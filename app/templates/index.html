@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EOB Extraction · Extract</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap-grid.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.js">
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.css" />
+    <style>
+        /* ---------- RESET & VARIABLES ---------- */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --paper: #EDEFE7; --paper-deep: #E3E6DC; --card: #FCFDFA;
+            --ink: #1C2620; --ink-soft: #4A5750; --muted: #7C8A80;
+            --line: #D2D8C9; --accent: #2F6F5E; --accent-dark: #1F4A3E;
+            --accent-tint: #DEEAE3; --amber: #B07C2C; --amber-tint: #F3E7D2;
+            --rose: #A0433F; --rose-tint: #F3DEDC; --radius: 10px;
+            --shadow: 0 1px 2px rgba(28,38,32,0.06), 0 6px 20px -10px rgba(28,38,32,0.18);
+        }
+        body {
+            background: var(--paper);
+            color: var(--ink);
+            font-family: 'Inter', system-ui, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .app { display: flex; flex-direction: column; height: 100vh; }
+        .app-header {
+            flex: 0 0 auto;
+            background: var(--card);
+            border-bottom: 1px solid var(--line);
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .app-header .stamp-mark {
+            width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--accent);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent); font-family: 'Roboto Slab', serif; font-weight: 700; font-size: 1rem;
+        }
+        .app-header h1 {
+            font-family: 'Roboto Slab', serif; font-weight: 700; font-size: 1.6rem;
+            margin: 0; letter-spacing: -0.01em;
+        }
+        .app-header .tagline {
+            margin: 0 0 0 12px; color: var(--ink-soft); font-size: 0.9rem;
+        }
+        .app-body { display: flex; flex: 1; overflow: hidden; }
+        .sidebar {
+            flex: 0 0 230px;
+            background: var(--card);
+            border-right: 1px solid var(--line);
+            padding: 20px 12px;
+            overflow-y: auto;
+        }
+        .sidebar .nav-section-title {
+            font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+        }
+        .sidebar .nav-item {
+            display: flex; align-items: center; gap: 12px;
+            width: 100%; padding: 10px 14px; border-radius: 8px;
+            border: 1px solid transparent; background: transparent;
+            color: var(--ink-soft); cursor: pointer; font-weight: 600;
+            font-size: 0.9rem; margin-bottom: 4px; text-decoration: none;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .sidebar .nav-item:hover, .sidebar .nav-item.active {
+            background: var(--accent-tint); color: var(--accent-dark); border-color: var(--accent-tint);
+        }
+        .sidebar .nav-item i { font-size: 1.2rem; width: 1.4rem; text-align: center; }
+
+        .main-content {
+            flex: 1; display: flex; gap: 24px; padding: 24px 32px;
+            overflow: hidden; background: var(--paper);
+        }
+        .left-column {
+            flex: 1; min-width: 0; display: flex; flex-direction: column;
+            gap: 16px; overflow-y: auto;
+        }
+        .right-column {
+            flex: 2; min-width: 0; display: flex; flex-direction: column;
+            background: var(--card); border: 1px solid var(--line);
+            border-radius: var(--radius); overflow: hidden; position: relative;
+        }
+        .right-column .preview-header {
+            padding: 10px 16px; background: var(--paper-deep);
+            border-bottom: 1px solid var(--line); font-weight: 600;
+            font-size: 0.9rem; color: var(--ink-soft);
+            display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+        }
+        .right-column .preview-header .page-info {
+            font-weight: 400; color: var(--muted); font-size: 0.8rem;
+        }
+        .preview-scroll {
+            flex: 1; overflow: auto; padding: 16px; background: var(--paper-deep);
+            display: flex; justify-content: center; align-items: flex-start;
+        }
+        .pdf-page-container { display: inline-block; position: relative; max-width: 100%; }
+        .pdf-page-container .textLayer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 2; pointer-events: auto; user-select: text; -webkit-user-select: text;
+        }
+        .pdf-page-container .textLayer span {
+            position: absolute; color: transparent; cursor: text; pointer-events: auto;
+            user-select: text; -webkit-user-select: text; white-space: pre; line-height: 1;
+            transform-origin: 0% 100%;
+        }
+        .pdf-page-container .textLayer span::selection { background: rgba(47,111,94,0.35); }
+        .no-pdf-message {
+            color: var(--muted); font-size: 0.95rem; padding: 40px 20px; text-align: center;
+        }
+
+        /* Upload area */
+        .upload-area {
+            position: relative; padding: 28px 20px; text-align: center;
+            border: 1.5px dashed var(--line); border-radius: var(--radius);
+            cursor: pointer; transition: border-color .2s ease, background .2s ease;
+            background: repeating-linear-gradient(135deg, rgba(47,111,94,0.02) 0 10px, transparent 10px 20px);
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--accent); background-color: var(--accent-tint);
+        }
+        .upload-area i.bi-cloud-arrow-up { font-size: 2rem; color: var(--accent); }
+        .upload-area strong {
+            font-family: 'Roboto Slab', serif; display: block; margin-top: 6px; font-size: 1rem;
+        }
+        .upload-area .hint { color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+        .upload-area input[type=file] {
+            position: absolute; inset: 0; opacity: 0; cursor: pointer;
+        }
+        #uploadStatus { font-size: 0.85rem; color: var(--muted); margin-top: 4px; min-height: 1.4em; }
+
+        /* File list for bulk */
+        .file-list {
+            background: var(--card); border: 1px solid var(--line);
+            border-radius: var(--radius); padding: 8px 12px; margin-top: 4px;
+            max-height: 120px; overflow-y: auto; font-size: 0.8rem;
+        }
+        .file-list .file-item {
+            display: flex; justify-content: space-between; padding: 3px 0;
+            border-bottom: 1px solid var(--line);
+        }
+        .file-list .file-item:last-child { border-bottom: none; }
+        .file-list .file-item .badge-status {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem;
+            padding: 0 8px; border-radius: 999px; background: var(--paper-deep);
+        }
+        .badge-status.extracting { background: var(--amber-tint); color: var(--amber); }
+        .badge-status.done { background: var(--accent-tint); color: var(--accent-dark); }
+        .badge-status.failed { background: var(--rose-tint); color: var(--rose); }
+        .badge-status.approved { background: var(--accent); color: white; }
+
+        /* Ledger (extracted fields) */
+        .ledger {
+            background: var(--card); border: 1px solid var(--line);
+            border-radius: var(--radius); overflow: hidden; flex-shrink: 0;
+        }
+        .ledger-row {
+            display: grid; grid-template-columns: 140px minmax(0,1fr) 90px;
+            align-items: start; gap: 12px; padding: 10px 16px;
+            border-bottom: 1px solid var(--line); font-size: 0.85rem; min-height: 48px;
+        }
+        .ledger-row:last-child { border-bottom: none; }
+        .row-label {
+            font-family: 'Roboto Slab', serif; font-size: 0.75rem;
+            color: var(--ink-soft); display: flex; align-items: center; gap: 6px; padding-top: 4px;
+        }
+        .row-label i { color: var(--accent); width: 1.1rem; flex-shrink: 0; }
+        .field-value {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem;
+            color: var(--ink); white-space: normal; overflow-wrap: anywhere;
+            word-break: break-word; min-width: 0; height: auto; line-height: 1.5;
+            padding: 3px 2px;
+        }
+        .stamp {
+            justify-self: end; font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6rem; font-weight: 600; letter-spacing: 0.04em;
+            padding: 3px 8px; border-radius: 999px; border: 1.5px solid var(--accent);
+            color: var(--accent-dark); background: var(--accent-tint);
+            transform: rotate(-1deg); white-space: nowrap; text-align: center;
+        }
+        .stamp.mid { border-color: var(--amber); color: #7A5720; background: var(--amber-tint); transform: rotate(1deg); }
+        .stamp.low { border-color: var(--rose); color: #7A2E2B; background: var(--rose-tint); transform: rotate(-1deg); }
+        .no-stamp {
+            justify-self: end; color: var(--muted); font-size: 0.65rem;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .cpt-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .cpt-chip {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+            background: var(--paper-deep); border: 1px solid var(--line);
+            border-radius: 6px; padding: 1px 6px;
+        }
+        .editable-wrap {
+            display: flex; align-items: flex-start; gap: 6px;
+            min-width: 0; width: 100%;
+        }
+        .editable-field {
+            width: 100%; min-width: 0; font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.9rem; line-height: 1.5; color: var(--ink);
+            background: transparent; border: none;
+            border-bottom: 1.5px dashed var(--line); padding: 3px 2px;
+            resize: none; transition: border-color .15s ease;
+            overflow: hidden;
+            white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip;
+        }
+        .editable-field:hover { border-bottom-color: var(--accent); }
+        .editable-field:focus {
+            outline: none; border-bottom: 1.5px solid var(--accent);
+            background: var(--accent-tint);
+        }
+        .editable-wrap i.bi-pencil {
+            color: var(--muted); font-size: 0.7rem; flex-shrink: 0; margin-top: 7px;
+        }
+
+        .action-bar {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 10px 16px; padding: 12px 16px; background: var(--card);
+            border: 1px solid var(--line); border-radius: var(--radius);
+            margin-top: 4px; flex-shrink: 0;
+        }
+        .action-bar .badge-count {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+            background: var(--accent-tint); color: var(--accent-dark);
+            padding: 2px 12px; border-radius: 999px; border: 1px solid var(--accent);
+            font-weight: 600; white-space: nowrap;
+        }
+        .action-bar .btn {
+            font-weight: 600; font-size: 0.8rem; padding: 6px 16px;
+            border-radius: 999px; border: none; cursor: pointer;
+            transition: background .15s, transform .1s;
+            display: inline-flex; align-items: center; gap: 6px;
+            background: var(--paper-deep); color: var(--ink-soft);
+            border: 1px solid var(--line); white-space: nowrap;
+        }
+        .action-bar .btn:hover { transform: translateY(-1px); }
+        .action-bar .btn-primary {
+            background: var(--accent); color: white; border-color: var(--accent);
+        }
+        .action-bar .btn-primary:hover { background: var(--accent-dark); }
+        .action-bar .btn-primary:disabled {
+            opacity: 0.5; cursor: not-allowed; transform: none;
+        }
+        .action-bar .btn-danger {
+            background: var(--rose); color: white; border-color: var(--rose);
+        }
+        .action-bar .btn-danger:hover { background: #7a2e2b; }
+        .action-bar .btn-danger:disabled {
+            opacity: 0.5; cursor: not-allowed;
+        }
+        .action-bar .btn-outline {
+            background: transparent; border: 1px solid var(--line);
+            color: var(--ink-soft);
+        }
+        .action-bar .btn-outline:hover { background: var(--paper-deep); }
+        .action-bar .toast-msg {
+            font-size: 0.8rem; color: var(--ink-soft); animation: fadeIn 0.3s ease;
+            flex: 1; min-width: 60px;
+        }
+        .action-bar .spacer { flex: 1; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .alert-custom {
+            margin-top: 8px; padding: 10px 14px; border-radius: var(--radius);
+            background: var(--rose-tint); border: 1px solid var(--rose);
+            color: #5c2422; font-size: 0.85rem; display: none;
+        }
+
+        #spinnerOverlay {
+            position: fixed; inset: 0; background: rgba(237,239,231,0.82);
+            display: none; align-items: center; justify-content: center;
+            flex-direction: column; gap: 14px; z-index: 50;
+        }
+        #spinnerOverlay.show { display: flex; }
+        .spin {
+            width: 38px; height: 38px; border: 3px solid var(--line);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #spinnerOverlay p {
+            font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;
+            color: var(--ink-soft);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .main-content { flex-direction: column; padding: 16px; }
+            .left-column { flex: none; max-height: 50vh; overflow-y: auto; }
+            .right-column { flex: 1; min-height: 40vh; }
+            .ledger-row { grid-template-columns: 1fr; gap: 4px; padding: 8px 12px; }
+            .stamp, .no-stamp { justify-self: start; }
+            .action-bar { flex-direction: column; align-items: stretch; }
+            .action-bar .btn { justify-content: center; }
+            .action-bar .spacer { display: none; }
+        }
+        @media (max-width: 768px) {
+            .sidebar { flex: 0 0 60px; padding: 12px 6px; }
+            .sidebar .nav-item span { display: none; }
+            .sidebar .nav-item { justify-content: center; }
+            .app-header .tagline { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div id="spinnerOverlay">
+        <div class="spin"></div>
+        <p id="spinnerMessage">Reading the document…</p>
+    </div>
+
+    <div class="app">
+        <header class="app-header">
+            <div class="stamp-mark">EOB</div>
+            <h1>Extraction</h1>
+            <span class="tagline">Drop an Explanation of Benefits</span>
+        </header>
+
+        <div class="app-body">
+            <aside class="sidebar">
+                <div class="nav-section-title">Main</div>
+                <a href="/" class="nav-item active"><i class="bi bi-file-earmark-arrow-up"></i><span>Extract</span></a>
+                <a href="/records" class="nav-item"><i class="bi bi-table"></i><span>Records</span></a>
+                <a href="/admin" class="nav-item"><i class="bi bi-shield-lock"></i><span>Admin</span></a>
+            </aside>
+
+            <div class="main-content">
+                <!-- LEFT COLUMN -->
+                <div class="left-column">
+                    <!-- Upload area -->
+                    <div class="upload-area" id="uploadArea">
+                        <i class="bi bi-cloud-arrow-up"></i>
+                        <strong>Drop your PDFs here</strong>
+                        <p class="hint">or click to browse (multiple allowed)</p>
+                        <input type="file" id="fileInput" accept=".pdf" multiple />
+                    </div>
+                    <div id="uploadStatus"></div>
+
+                    <!-- File list for bulk -->
+                    <div id="fileListContainer" style="display:none;">
+                        <div class="file-list" id="fileList"></div>
+                        <div style="margin-top:6px;">
+                            <button class="btn btn-primary" id="extractAllBtn" disabled><i class="bi bi-play-fill"></i> Extract All</button>
+                            <button class="btn btn-outline" id="clearFilesBtn"><i class="bi bi-x-circle"></i> Clear</button>
+                            <span id="progressMsg" style="font-size:0.8rem; color:var(--muted); margin-left:10px;"></span>
+                        </div>
+                    </div>
+
+                    <!-- Extracted fields (ledger) – shown during approval -->
+                    <div id="resultsSection" style="display:none;">
+                        <div class="ledger">
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-hash"></i> Check</div>
+                                <div class="field-value" id="checkNumber">—</div>
+                                <div class="stamp" id="checkNumberConf">0%</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-calendar-event"></i> Date</div>
+                                <div class="field-value" id="checkDate">—</div>
+                                <div class="stamp" id="checkDateConf">0%</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-currency-dollar"></i> Amount</div>
+                                <div class="field-value" id="checkAmount">—</div>
+                                <div class="stamp" id="checkAmountConf">0%</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-shield-check"></i> Insurance</div>
+                                <div class="editable-wrap">
+                                    <textarea class="editable-field" id="insuranceName" placeholder="—"></textarea>
+                                    <i class="bi bi-pencil"></i>
+                                </div>
+                                <div class="no-stamp">edit</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-hospital"></i> Practice</div>
+                                <div class="editable-wrap">
+                                    <textarea class="editable-field" id="practiceName" placeholder="—"></textarea>
+                                    <i class="bi bi-pencil"></i>
+                                </div>
+                                <div class="no-stamp">edit</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-clipboard2-pulse"></i> CPT Codes</div>
+                                <div class="cpt-chips" id="cptCodes"></div>
+                                <div class="stamp" id="cptConf">0%</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-123"></i> CPT Count</div>
+                                <div class="field-value" id="cptCount">0</div>
+                                <div class="no-stamp">occurrences</div>
+                            </div>
+                        </div>
+
+                        <div class="action-bar" id="actionBar">
+                            <span class="badge-count" id="recordCounter"><i class="bi bi-database"></i> 0 records</span>
+                            <div class="spacer"></div>
+                            <button class="btn btn-primary" id="approveBtn"><i class="bi bi-check2-circle"></i> Approve &amp; Next</button>
+                            <button class="btn btn-danger" id="skipBtn" style="display:none;"><i class="bi bi-x-circle"></i> Skip</button>
+                            <span id="actionToast" class="toast-msg"></span>
+                        </div>
+                    </div>
+
+                    <div id="errorAlert" class="alert-custom"></div>
+                </div>
+
+                <!-- RIGHT COLUMN – PDF preview -->
+                <div class="right-column">
+                    <div class="preview-header">
+                        <span>PDF Preview</span>
+                        <span class="page-info" id="pageInfo">Page 1</span>
+                    </div>
+                    <div class="preview-scroll" id="previewScroll">
+                        <div id="pdfPageContainer" class="pdf-page-container">
+                            <div class="no-pdf-message">No PDF loaded</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // DOM refs
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const pdfContainer = document.getElementById('pdfPageContainer');
+        const pageInfo = document.getElementById('pageInfo');
+        const resultsSection = document.getElementById('resultsSection');
+        const errorAlert = document.getElementById('errorAlert');
+        const spinner = document.getElementById('spinnerOverlay');
+        const spinnerMsg = document.getElementById('spinnerMessage');
+        const uploadStatus = document.getElementById('uploadStatus');
+
+        const fields = {
+            checkNumber: document.getElementById('checkNumber'),
+            checkDate: document.getElementById('checkDate'),
+            checkAmount: document.getElementById('checkAmount'),
+            insuranceName: document.getElementById('insuranceName'),
+            practiceName: document.getElementById('practiceName'),
+            cptCodes: document.getElementById('cptCodes'),
+            cptCount: document.getElementById('cptCount'),
+        };
+        const confs = {
+            checkNumber: document.getElementById('checkNumberConf'),
+            checkDate: document.getElementById('checkDateConf'),
+            checkAmount: document.getElementById('checkAmountConf'),
+            cptConf: document.getElementById('cptConf'),
+        };
+
+        const approveBtn = document.getElementById('approveBtn');
+        const skipBtn = document.getElementById('skipBtn');
+        const recordCounter = document.getElementById('recordCounter');
+        const actionToast = document.getElementById('actionToast');
+
+        // Bulk elements
+        const fileListContainer = document.getElementById('fileListContainer');
+        const fileList = document.getElementById('fileList');
+        const extractAllBtn = document.getElementById('extractAllBtn');
+        const clearFilesBtn = document.getElementById('clearFilesBtn');
+        const progressMsg = document.getElementById('progressMsg');
+
+        // State
+        let submittedRecords = [];
+        let selectedFiles = []; // array of { file: File, status: string }
+        let bulkResults = [];   // array of { filename, status } for summary tracking
+        let isProcessing = false;
+        let currentIndex = 0;
+        let waitingForApproval = false;
+
+        // ---------- helpers ----------
+        function stampClass(confidence) {
+            if (confidence >= 0.85) return '';
+            if (confidence >= 0.6) return 'mid';
+            return 'low';
+        }
+
+        function getCurrentRecordFromLedger() {
+            const cptChips = fields.cptCodes.querySelectorAll('.cpt-chip');
+            const cptList = Array.from(cptChips).map(el => el.textContent.trim());
+            return {
+                checkNumber: fields.checkNumber.textContent !== '—' ? fields.checkNumber.textContent : '',
+                checkDate: fields.checkDate.textContent !== '—' ? fields.checkDate.textContent : '',
+                checkAmount: fields.checkAmount.textContent !== '—' ? fields.checkAmount.textContent : '',
+                insuranceName: fields.insuranceName.value.trim(),
+                practiceName: fields.practiceName.value.trim(),
+                cptCodes: cptList.join('; '),
+                cptCount: fields.cptCount.textContent,
+            };
+        }
+
+        function updateCounter() {
+            const count = submittedRecords.length;
+            recordCounter.innerHTML = `<i class="bi bi-database"></i> ${count} record${count !== 1 ? 's' : ''}`;
+        }
+
+        function showToast(msg, isGood = true) {
+            actionToast.textContent = msg;
+            actionToast.style.color = isGood ? 'var(--accent-dark)' : 'var(--rose)';
+            clearTimeout(window.toastTimer);
+            window.toastTimer = setTimeout(() => { actionToast.textContent = ''; }, 4000);
+        }
+
+        function showError(msg) {
+            errorAlert.textContent = msg;
+            errorAlert.style.display = 'block';
+        }
+
+        function hideError() { errorAlert.style.display = 'none'; }
+
+        function resetLedger() {
+            fields.checkNumber.textContent = '—';
+            fields.checkDate.textContent = '—';
+            fields.checkAmount.textContent = '—';
+            fields.insuranceName.value = '';
+            fields.practiceName.value = '';
+            fields.cptCodes.innerHTML = '';
+            fields.cptCount.textContent = '0';
+            confs.checkNumber.textContent = '0%';
+            confs.checkNumber.className = 'stamp';
+            confs.checkDate.textContent = '0%';
+            confs.checkDate.className = 'stamp';
+            confs.checkAmount.textContent = '0%';
+            confs.checkAmount.className = 'stamp';
+            confs.cptConf.textContent = '0%';
+            confs.cptConf.className = 'stamp';
+            resultsSection.style.display = 'none';
+            // Reset textarea heights
+            fields.insuranceName.style.height = 'auto';
+            fields.practiceName.style.height = 'auto';
+        }
+
+        // Clear the PDF preview area
+        function clearPreview() {
+            pdfContainer.innerHTML = `<div class="no-pdf-message">No PDF loaded</div>`;
+            pageInfo.textContent = '—';
+        }
+
+        function setFieldWithConf(id, value, confidence) {
+            const fieldEl = fields[id];
+            const confEl = confs[id];
+            fieldEl.textContent = value || '—';
+            confEl.textContent = `${(confidence * 100).toFixed(1)}%`;
+            confEl.className = `stamp ${stampClass(confidence)}`;
+        }
+
+        // Auto-grow for textareas
+        function autoGrowTextarea(textarea) {
+            if (!textarea) return;
+            textarea.style.height = 'auto';
+            textarea.style.overflow = 'hidden';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+
+        // ---------- PDF rendering ----------
+        async function renderPdfPage(pdfData, pageNumber = 1, scale = 1.5) {
+            try {
+                const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+                const pdf = await loadingTask.promise;
+                const page = await pdf.getPage(pageNumber);
+                const viewport = page.getViewport({ scale });
+
+                pdfContainer.innerHTML = '';
+                const wrapper = document.createElement('div');
+                wrapper.style.position = 'relative';
+                wrapper.style.display = 'inline-block';
+                wrapper.style.width = `${viewport.width}px`;
+                wrapper.style.height = `${viewport.height}px`;
+                wrapper.style.background = 'white';
+                wrapper.style.boxShadow = '0 2px 12px rgba(0,0,0,0.12)';
+                wrapper.style.borderRadius = '4px';
+                wrapper.style.overflow = 'hidden';
+
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = Math.ceil(viewport.width);
+                canvas.height = Math.ceil(viewport.height);
+                canvas.style.position = 'absolute';
+                canvas.style.left = '0';
+                canvas.style.top = '0';
+                canvas.style.width = `${viewport.width}px`;
+                canvas.style.height = `${viewport.height}px`;
+                canvas.style.display = 'block';
+                wrapper.appendChild(canvas);
+
+                await page.render({ canvasContext: context, viewport }).promise;
+
+                const textContent = await page.getTextContent();
+                const textLayerDiv = document.createElement('div');
+                textLayerDiv.className = 'textLayer';
+                textLayerDiv.style.position = 'absolute';
+                textLayerDiv.style.left = '0';
+                textLayerDiv.style.top = '0';
+                textLayerDiv.style.width = `${viewport.width}px`;
+                textLayerDiv.style.height = `${viewport.height}px`;
+                textLayerDiv.style.zIndex = '2';
+                textLayerDiv.style.pointerEvents = 'auto';
+                textLayerDiv.style.userSelect = 'text';
+                textLayerDiv.style.webkitUserSelect = 'text';
+                wrapper.appendChild(textLayerDiv);
+
+                for (const item of textContent.items) {
+                    if (!item.str || !item.str.trim()) continue;
+                    const span = document.createElement('span');
+                    span.textContent = item.str;
+                    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+                    const x = tx[4];
+                    const y = tx[5];
+                    const fontHeight = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+                    const angle = Math.atan2(tx[1], tx[0]);
+                    span.style.position = 'absolute';
+                    span.style.left = `${x}px`;
+                    span.style.top = `${y - fontHeight}px`;
+                    span.style.fontSize = `${fontHeight}px`;
+                    span.style.fontFamily = 'sans-serif';
+                    span.style.lineHeight = '1';
+                    span.style.whiteSpace = 'pre';
+                    if (Math.abs(angle) > 0.001) {
+                        span.style.transform = `rotate(${angle}rad)`;
+                        span.style.transformOrigin = '0% 100%';
+                    }
+                    span.style.color = 'transparent';
+                    span.style.cursor = 'text';
+                    span.style.pointerEvents = 'auto';
+                    span.style.userSelect = 'text';
+                    span.style.webkitUserSelect = 'text';
+                    textLayerDiv.appendChild(span);
+                }
+
+                pdfContainer.appendChild(wrapper);
+                pdfContainer.style.display = 'inline-block';
+                pageInfo.textContent = `Page ${pageNumber} of ${pdf.numPages}`;
+
+            } catch (err) {
+                console.error('PDF render error:', err);
+                pdfContainer.innerHTML = `
+                    <div class="no-pdf-message" style="color:var(--rose);">
+                        Failed to render PDF: ${err.message}
+                    </div>
+                `;
+            }
+        }
+
+        // ---------- API calls ----------
+        async function extractSingleFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch('api/extract', { method: 'POST', body: formData });
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Server error (${response.status}): ${errText}`);
+            }
+            return await response.json();
+        }
+
+        async function submitRecord(record) {
+            const res = await fetch('api/records', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(record),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Server error');
+            }
+            return res.json();
+        }
+
+        // ---------- Bulk sequential extraction with approval ----------
+        async function processBulk() {
+            if (isProcessing) return;
+            if (selectedFiles.length === 0) return;
+            isProcessing = true;
+            extractAllBtn.disabled = true;
+            clearFilesBtn.disabled = true;
+            bulkResults = [];
+            resetLedger();
+            clearPreview();
+            hideError();
+
+            let processedCount = 0;
+            const total = selectedFiles.length;
+            currentIndex = 0;
+
+            approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+
+            while (currentIndex < total) {
+                const item = selectedFiles[currentIndex];
+                const file = item.file;
+                item.status = 'extracting';
+                updateFileList();
+                progressMsg.textContent = `Processing ${currentIndex+1}/${total}...`;
+
+                // Render first page
+                try {
+                    const reader = new FileReader();
+                    const pdfData = await new Promise((resolve, reject) => {
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                    await renderPdfPage(pdfData, 1, 1.5);
+                } catch (err) {
+                    console.warn('Preview failed:', err);
+                    // Continue extraction anyway
+                }
+
+                // Extract
+                let extractionSuccess = false;
+                let data = null;
+                let errorMsg = '';
+                try {
+                    data = await extractSingleFile(file);
+                    extractionSuccess = true;
+                } catch (err) {
+                    errorMsg = err.message;
+                }
+
+                if (!extractionSuccess) {
+                    // Show error toast and move on
+                    showToast(`Failed: ${file.name} – ${errorMsg}`, false);
+                    bulkResults.push({ filename: file.name, status: 'failed' });
+                    item.status = 'failed';
+                    updateFileList();
+                    currentIndex++;
+                    continue;
+                }
+
+                // Success – populate ledger
+                const cpt = data.cpt_codes;
+                setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
+                setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
+                setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
+                fields.insuranceName.value = data.insurance_name.value || '';
+                fields.practiceName.value = data.practice_name.value || '';
+                fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
+                    cpt.cpt_codes.map(c => `<span class="cpt-chip">${c}</span>`).join('') :
+                    '<span class="no-stamp">None found</span>';
+                fields.cptCount.textContent = cpt.cpt_total_occurrences;
+                const cptPct = cpt.extraction_confidence;
+                confs.cptConf.textContent = `${(cptPct * 100).toFixed(1)}%`;
+                confs.cptConf.className = `stamp ${stampClass(cptPct)}`;
+
+                resultsSection.style.display = 'block';
+
+                // Auto-grow textareas
+                requestAnimationFrame(() => {
+                    autoGrowTextarea(fields.insuranceName);
+                    autoGrowTextarea(fields.practiceName);
+                });
+
+                approveBtn.disabled = false;
+                approveBtn.textContent = '✅ Approve & Next';
+                skipBtn.style.display = 'inline-block';
+                skipBtn.textContent = '⏭️ Skip';
+
+                waitingForApproval = true;
+                const action = await new Promise((resolve) => {
+                    const onApprove = () => {
+                        approveBtn.disabled = true;
+                        skipBtn.style.display = 'none';
+                        resolve('approve');
+                    };
+                    const onSkip = () => {
+                        approveBtn.disabled = true;
+                        skipBtn.style.display = 'none';
+                        resolve('skip');
+                    };
+                    approveBtn.onclick = onApprove;
+                    skipBtn.onclick = onSkip;
+                });
+
+                // Process action
+                if (action === 'approve') {
+                    const record = getCurrentRecordFromLedger();
+                    const duplicate = submittedRecords.some(r =>
+                        r.checkNumber === record.checkNumber &&
+                        r.checkDate === record.checkDate &&
+                        r.checkAmount === record.checkAmount
+                    );
+                    if (!duplicate) {
+                        try {
+                            await submitRecord(record);
+                            submittedRecords.push({ ...record });
+                            updateCounter();
+                            showToast(`✅ Record #${submittedRecords.length} added.`);
+                        } catch (err) {
+                            showToast(`Submission failed: ${err.message}`, false);
+                            bulkResults.push({ filename: file.name, status: 'submission_failed' });
+                            item.status = 'failed';
+                            updateFileList();
+                            resetLedger();
+                            clearPreview();
+                            currentIndex++;
+                            continue;
+                        }
+                    } else {
+                        showToast('⏭️ Duplicate skipped.', false);
+                    }
+                    bulkResults.push({ filename: file.name, status: 'approved' });
+                    item.status = 'approved';
+                } else { // skip
+                    bulkResults.push({ filename: file.name, status: 'skipped' });
+                    item.status = 'skipped';
+                    showToast('⏭️ Skipped.', false);
+                }
+
+                // Clear preview and ledger
+                clearPreview();
+                resetLedger();
+
+                updateFileList();
+                currentIndex++;
+                processedCount++;
+            }
+
+            // Done
+            isProcessing = false;
+            waitingForApproval = false;
+            extractAllBtn.disabled = false;
+            clearFilesBtn.disabled = false;
+            progressMsg.textContent = `✅ Done — ${processedCount} files processed.`;
+            const approvedCount = bulkResults.filter(r => r.status === 'approved').length;
+            showToast(`Completed. ${approvedCount} approved.`);
+            approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+        }
+
+        function updateFileList() {
+            if (selectedFiles.length === 0) {
+                fileListContainer.style.display = 'none';
+                extractAllBtn.disabled = true;
+                return;
+            }
+            fileListContainer.style.display = 'block';
+            fileList.innerHTML = selectedFiles.map((item, idx) => {
+                let cls = 'badge-status';
+                if (item.status === 'extracting') cls += ' extracting';
+                else if (item.status === 'done') cls += ' done';
+                else if (item.status === 'failed') cls += ' failed';
+                else if (item.status === 'approved') cls += ' approved';
+                else if (item.status === 'skipped') cls += ' done';
+                return `
+                    <div class="file-item">
+                        <span>${item.file.name}</span>
+                        <span class="${cls}">${item.status || 'pending'}</span>
+                    </div>
+                `;
+            }).join('');
+            extractAllBtn.disabled = false;
+        }
+
+        // ---------- Clear files ----------
+        clearFilesBtn.addEventListener('click', function() {
+            if (isProcessing) return;
+            selectedFiles = [];
+            fileInput.value = '';
+            updateFileList();
+            uploadStatus.textContent = '';
+            hideError();
+            bulkResults = [];
+            resetLedger();
+            clearPreview();
+            progressMsg.textContent = '';
+            approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+        });
+
+        // Extract All
+        extractAllBtn.addEventListener('click', processBulk);
+
+        // ---------- Single file mode (if only one selected) ----------
+        async function handleSingleFile(file) {
+            resetLedger();
+            clearPreview();
+            hideError();
+            uploadStatus.textContent = `Selected: ${file.name}`;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const pdfData = e.target.result;
+                try {
+                    await renderPdfPage(pdfData, 1, 1.5);
+                } catch (err) {
+                    showError('Failed to render PDF preview: ' + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+
+            spinner.classList.add('show');
+            spinnerMsg.textContent = `Extracting ${file.name}…`;
+            try {
+                const data = await extractSingleFile(file);
+                setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
+                setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
+                setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
+                fields.insuranceName.value = data.insurance_name.value || '';
+                fields.practiceName.value = data.practice_name.value || '';
+
+                const cpt = data.cpt_codes;
+                fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
+                    cpt.cpt_codes.map(c => `<span class="cpt-chip">${c}</span>`).join('') :
+                    '<span class="no-stamp">None found</span>';
+                fields.cptCount.textContent = cpt.cpt_total_occurrences;
+                const cptPct = cpt.extraction_confidence;
+                confs.cptConf.textContent = `${(cptPct * 100).toFixed(1)}%`;
+                confs.cptConf.className = `stamp ${stampClass(cptPct)}`;
+
+                resultsSection.style.display = 'block';
+                requestAnimationFrame(() => {
+                    autoGrowTextarea(fields.insuranceName);
+                    autoGrowTextarea(fields.practiceName);
+                });
+
+                approveBtn.textContent = '✅ Approve';
+                approveBtn.disabled = false;
+                skipBtn.style.display = 'none';
+                approveBtn.onclick = async function() {
+                    const record = getCurrentRecordFromLedger();
+                    const duplicate = submittedRecords.some(r =>
+                        r.checkNumber === record.checkNumber &&
+                        r.checkDate === record.checkDate &&
+                        r.checkAmount === record.checkAmount
+                    );
+                    if (duplicate) { showToast('Duplicate skipped.', false); resetLedger(); clearPreview(); return; }
+                    try {
+                        await submitRecord(record);
+                        submittedRecords.push({ ...record });
+                        updateCounter();
+                        showToast(`✅ Record #${submittedRecords.length} added.`);
+                        resetLedger();
+                        clearPreview();
+                    } catch (err) {
+                        showToast(`Failed: ${err.message}`, false);
+                    }
+                };
+            } catch (err) {
+                showError(`Extraction failed: ${err.message}`);
+                resultsSection.style.display = 'none';
+            } finally {
+                spinner.classList.remove('show');
+            }
+        }
+
+        // ---- Load records from server ----
+        async function loadRecordsFromServer() {
+            try {
+                const res = await fetch('api/records');
+                if (res.ok) {
+                    const data = await res.json();
+                    submittedRecords = data;
+                    updateCounter();
+                }
+            } catch (e) { console.warn('Could not load records:', e); }
+        }
+
+        // ---- Upload events ----
+        fileInput.addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (!files.length) return;
+            if (files.length === 1) {
+                selectedFiles = [];
+                fileListContainer.style.display = 'none';
+                handleSingleFile(files[0]);
+                return;
+            }
+            resetLedger();
+            clearPreview();
+            resultsSection.style.display = 'none';
+            selectedFiles = Array.from(files).map(f => ({ file: f, status: 'pending' }));
+            updateFileList();
+            uploadStatus.textContent = `${selectedFiles.length} files selected.`;
+            hideError();
+            pdfContainer.innerHTML = `<div class="no-pdf-message">${selectedFiles.length} files ready for bulk extraction.</div>`;
+            pageInfo.textContent = 'Bulk mode';
+            progressMsg.textContent = '';
+            approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+        });
+
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => { uploadArea.classList.remove('dragover'); });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (!files.length) return;
+            const dt = new DataTransfer();
+            for (let f of files) dt.items.add(f);
+            fileInput.files = dt.files;
+            fileInput.dispatchEvent(new Event('change'));
+        });
+
+        // ---- Init ----
+        loadRecordsFromServer();
+        updateCounter();
+    </script>
+</body>
+</html>

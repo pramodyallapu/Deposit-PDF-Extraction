@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EOB Extraction · Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap-grid.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper: #EDEFE7;
+      --paper-deep: #E3E6DC;
+      --card: #FCFDFA;
+      --ink: #1C2620;
+      --ink-soft: #4A5750;
+      --muted: #7C8A80;
+      --line: #D2D8C9;
+      --accent: #2F6F5E;
+      --accent-dark: #1F4A3E;
+      --accent-tint: #DEEAE3;
+      --amber: #B07C2C;
+      --amber-tint: #F3E7D2;
+      --rose: #A0433F;
+      --rose-tint: #F3DEDC;
+      --radius: 10px;
+      --shadow: 0 1px 2px rgba(28,38,32,0.06), 0 6px 20px -10px rgba(28,38,32,0.18);
+    }
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: 'Inter', system-ui, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .app { display: flex; flex-direction: column; height: 100vh; }
+    .app-header {
+      flex: 0 0 auto;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .app-header .stamp-mark {
+      width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--accent); font-family: 'Roboto Slab', serif; font-weight: 700; font-size: 1rem;
+    }
+    .app-header h1 {
+      font-family: 'Roboto Slab', serif; font-weight: 700; font-size: 1.6rem;
+      margin: 0; letter-spacing: -0.01em;
+    }
+    .app-header .tagline {
+      margin: 0 0 0 12px; color: var(--ink-soft); font-size: 0.9rem;
+    }
+    .app-body { display: flex; flex: 1; overflow: hidden; }
+    .sidebar {
+      flex: 0 0 230px;
+      background: var(--card);
+      border-right: 1px solid var(--line);
+      padding: 20px 12px;
+      overflow-y: auto;
+    }
+    .sidebar .nav-section-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .sidebar .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 4px;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .sidebar .nav-item:hover,
+    .sidebar .nav-item.active {
+      background: var(--accent-tint);
+      color: var(--accent-dark);
+      border-color: var(--accent-tint);
+    }
+    .sidebar .nav-item i { font-size: 1.2rem; width: 1.4rem; text-align: center; }
+
+    .main-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 32px;
+      background: var(--paper);
+    }
+
+    .admin-layout {
+      display: flex;
+      gap: 32px;
+      flex-wrap: wrap;
+    }
+    .payer-list {
+      flex: 1 1 300px;
+      min-width: 220px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      max-height: 500px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .payer-list .list-header {
+      font-weight: 600;
+      color: var(--ink-soft);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .payer-list .list-items {
+      flex: 1;
+      overflow-y: auto;
+    }
+    .payer-list .list-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.1s;
+      margin-bottom: 2px;
+    }
+    .payer-list .list-item:hover {
+      background: var(--accent-tint);
+    }
+    .payer-list .list-item.active {
+      background: var(--accent);
+      color: white;
+    }
+    .payer-list .list-item .badge-aliases {
+      font-size: 0.7rem;
+      background: var(--paper-deep);
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: var(--ink-soft);
+    }
+    .payer-list .list-item.active .badge-aliases {
+      background: rgba(255,255,255,0.2);
+      color: white;
+    }
+    .payer-list .list-footer {
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+
+    .payer-form {
+      flex: 2 1 400px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: none;
+    }
+    .payer-form.visible {
+      display: block;
+    }
+    .payer-form .form-group {
+      margin-bottom: 16px;
+    }
+    .payer-form label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--ink-soft);
+      margin-bottom: 4px;
+    }
+    .payer-form input[type="text"],
+    .payer-form textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font: inherit;
+      background: white;
+    }
+    .payer-form textarea {
+      min-height: 80px;
+      resize: vertical;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.9rem;
+    }
+    .payer-form .form-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .btn {
+      font-weight: 600;
+      font-size: 0.85rem;
+      padding: 8px 18px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--paper-deep);
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-danger { background: var(--rose); color: white; border-color: var(--rose); }
+    .btn-danger:hover { background: #7a2e2b; }
+    .btn-outline { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); }
+    .btn-outline:hover { background: var(--paper-deep); }
+    .btn-success { background: var(--amber); color: white; border-color: var(--amber); }
+    .btn-success:hover { background: #8f6624; }
+
+    .status-msg {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      color: var(--ink-soft);
+    }
+    .status-msg.error { color: var(--rose); }
+
+    .mode-indicator {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-left: 8px;
+    }
+    .mode-indicator.new {
+      color: var(--amber);
+    }
+
+    @media (max-width: 768px) {
+      .sidebar { flex: 0 0 60px; padding: 12px 6px; }
+      .sidebar .nav-item span { display: none; }
+      .sidebar .nav-item { justify-content: center; }
+      .app-header .tagline { display: none; }
+      .main-content { padding: 16px; }
+      .admin-layout { flex-direction: column; }
+      .payer-list { max-height: 250px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <div class="stamp-mark">EOB</div>
+    <h1>Admin</h1>
+    <span class="tagline">Insurance alias management</span>
+  </header>
+  <div class="app-body">
+    <aside class="sidebar">
+      <div class="nav-section-title">Main</div>
+      <a href="/" class="nav-item"><i class="bi bi-file-earmark-arrow-up"></i><span>Extract</span></a>
+      <a href="/records" class="nav-item"><i class="bi bi-table"></i><span>Records</span></a>
+      <a href="/admin" class="nav-item active"><i class="bi bi-shield-lock"></i><span>Admin</span></a>
+    </aside>
+    <main class="main-content">
+      <h2 style="font-family:'Roboto Slab',serif; font-weight:700; font-size:1.4rem; margin-bottom:20px;">
+        Payer Aliases
+        <span id="modeIndicator" class="mode-indicator"></span>
+      </h2>
+
+      <div class="admin-layout">
+        <!-- Left: payer list + New Payer button -->
+        <div class="payer-list" id="payerList">
+          <div class="list-header">
+            <span>Insurance Names</span>
+            <span style="font-weight:400; font-size:0.75rem; color:var(--muted);" id="payerCount">0</span>
+          </div>
+          <div class="list-items" id="payerItems"></div>
+          <div class="list-footer">
+            <button class="btn btn-success" id="addBtn" style="width:100%; justify-content:center;">
+              <i class="bi bi-plus-circle"></i> New Payer
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: edit form -->
+        <div class="payer-form" id="payerForm">
+          <div class="form-group">
+            <label for="insuranceNameInput">Insurance Name (canonical)</label>
+            <input type="text" id="insuranceNameInput" placeholder="e.g. Aetna" />
+          </div>
+          <div class="form-group">
+            <label for="aliasesInput">Possible Names (aliases, comma separated)</label>
+            <textarea id="aliasesInput" placeholder="aetna, aetna better health, ..."></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="updateBtn"><i class="bi bi-pencil"></i> Update</button>
+            <button class="btn btn-danger" id="deleteBtn"><i class="bi bi-trash3"></i> Delete</button>
+            <button class="btn btn-outline" id="cancelBtn" style="display:none;"><i class="bi bi-x-circle"></i> Cancel</button>
+            <button class="btn btn-outline" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+          </div>
+          <div id="statusMsg" class="status-msg"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  // ---------- state ----------
+  let payers = [];
+  let selectedIndex = -1;
+  let isNew = false;
+  let originalName = '';
+
+  // DOM refs
+  const payerItems = document.getElementById('payerItems');
+  const payerCount = document.getElementById('payerCount');
+  const payerForm = document.getElementById('payerForm');
+  const insuranceNameInput = document.getElementById('insuranceNameInput');
+  const aliasesInput = document.getElementById('aliasesInput');
+  const statusMsg = document.getElementById('statusMsg');
+  const modeIndicator = document.getElementById('modeIndicator');
+
+  const updateBtn = document.getElementById('updateBtn');
+  const deleteBtn = document.getElementById('deleteBtn');
+  const addBtn = document.getElementById('addBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  // ---------- helpers ----------
+  function setStatus(msg, isError = false) {
+    statusMsg.textContent = msg;
+    statusMsg.className = 'status-msg' + (isError ? ' error' : '');
+  }
+
+  function showForm(show) {
+    payerForm.classList.toggle('visible', show);
+  }
+
+  function renderList() {
+    let html = '';
+    if (payers.length === 0) {
+      html = `<div style="color:var(--muted); text-align:center; padding:20px 0;">No payers defined</div>`;
+    } else {
+      payers.forEach((p, idx) => {
+        const active = (!isNew && idx === selectedIndex) ? 'active' : '';
+        const aliasCount = p.aliases ? p.aliases.length : 0;
+        html += `
+          <div class="list-item ${active}" data-index="${idx}">
+            <span>${p.name || '(unnamed)'}</span>
+            <span class="badge-aliases">${aliasCount} alias${aliasCount !== 1 ? 'es' : ''}</span>
+          </div>
+        `;
+      });
+    }
+    payerItems.innerHTML = html;
+    payerCount.textContent = payers.length;
+
+    document.querySelectorAll('.list-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.index, 10);
+        if (isNew) {
+          if (!confirm('You have unsaved changes. Discard and select existing payer?')) return;
+          cancelNewPayer();
+        }
+        selectPayer(idx);
+      });
+    });
+  }
+
+  function selectPayer(idx) {
+    if (idx < 0 || idx >= payers.length) {
+      selectedIndex = -1;
+      originalName = '';
+      insuranceNameInput.value = '';
+      aliasesInput.value = '';
+      isNew = false;
+      updateModeIndicator();
+      showForm(false);
+      renderList();
+      return;
+    }
+    selectedIndex = idx;
+    const p = payers[idx];
+    originalName = p.name;
+    insuranceNameInput.value = p.name || '';
+    aliasesInput.value = (p.aliases || []).join(', ');
+    isNew = false;
+    showForm(true);
+    updateModeIndicator();
+    renderList();
+    setStatus(`Editing "${p.name}"`);
+  }
+
+  function loadPayerIntoForm(idx) {
+    if (idx < 0 || idx >= payers.length) {
+      insuranceNameInput.value = '';
+      aliasesInput.value = '';
+      originalName = '';
+      showForm(false);
+      return;
+    }
+    const p = payers[idx];
+    originalName = p.name;
+    insuranceNameInput.value = p.name || '';
+    aliasesInput.value = (p.aliases || []).join(', ');
+    showForm(true);
+  }
+
+  function updateModeIndicator() {
+    if (isNew) {
+      modeIndicator.textContent = '(new)';
+      modeIndicator.className = 'mode-indicator new';
+      cancelBtn.style.display = 'inline-flex';
+      updateBtn.innerHTML = '<i class="bi bi-plus-circle"></i> Create';
+      deleteBtn.disabled = true;
+      addBtn.style.display = 'none';          // ← hide "New Payer" button
+    } else {
+      modeIndicator.textContent = '';
+      modeIndicator.className = 'mode-indicator';
+      cancelBtn.style.display = 'none';
+      updateBtn.innerHTML = '<i class="bi bi-pencil"></i> Update';
+      deleteBtn.disabled = false;
+      addBtn.style.display = 'flex';          // ← show "New Payer" button
+    }
+  }
+
+  function cancelNewPayer() {
+    isNew = false;
+    if (selectedIndex >= 0 && selectedIndex < payers.length) {
+      loadPayerIntoForm(selectedIndex);
+      showForm(true);
+    } else {
+      insuranceNameInput.value = '';
+      aliasesInput.value = '';
+      showForm(false);
+    }
+    updateModeIndicator();
+    renderList();
+    setStatus('Cancelled new payer.');
+  }
+
+  // ---------- server API ----------
+  async function loadPayersFromServer() {
+    try {
+      const res = await fetch('/api/admin/payers');
+      if (!res.ok) throw new Error('Failed to fetch payers');
+      const data = await res.json();
+      payers = data.payers || [];
+      payers = payers.map(p => ({ name: p.name || '', aliases: p.aliases || [] }));
+      payers.sort((a, b) => a.name.localeCompare(b.name));
+
+      // Clear selection – no auto-select
+      selectedIndex = -1;
+      originalName = '';
+      insuranceNameInput.value = '';
+      aliasesInput.value = '';
+      isNew = false;
+      showForm(false);
+      updateModeIndicator();
+      renderList();
+      setStatus(`Loaded ${payers.length} payers.`);
+    } catch (err) {
+      setStatus('Error loading payers: ' + err.message, true);
+    }
+  }
+
+  async function createPayer(name, aliases) {
+    const res = await fetch('/api/admin/payer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, aliases }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to create payer');
+    }
+    return await res.json();
+  }
+
+  async function updatePayer(name, aliases) {
+    const res = await fetch(`/api/admin/payer/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aliases }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to update payer');
+    }
+    return await res.json();
+  }
+
+  async function deletePayer(name) {
+    const res = await fetch(`/api/admin/payer/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to delete payer');
+    }
+    return await res.json();
+  }
+
+  // ---------- UI actions ----------
+  async function saveCurrentPayer() {
+    const name = insuranceNameInput.value.trim();
+    if (!name) {
+      setStatus('Insurance name cannot be empty.', true);
+      return;
+    }
+    const aliases = aliasesInput.value.split(',').map(s => s.trim()).filter(Boolean);
+
+    const duplicate = payers.some((p, idx) => {
+      if (isNew) return p.name.toLowerCase() === name.toLowerCase();
+      return idx !== selectedIndex && p.name.toLowerCase() === name.toLowerCase();
+    });
+    if (duplicate) {
+      setStatus(`A payer with name "${name}" already exists.`, true);
+      return;
+    }
+
+    try {
+      if (isNew) {
+        await createPayer(name, aliases);
+        setStatus(`Created "${name}".`);
+        isNew = false;
+        await loadPayersFromServer();
+        // Auto-select the newly created payer
+        const newIdx = payers.findIndex(p => p.name === name);
+        if (newIdx >= 0) {
+          selectedIndex = newIdx;
+          loadPayerIntoForm(newIdx);
+          showForm(true);
+          renderList();
+          updateModeIndicator();
+        }
+      } else {
+        const oldName = originalName;
+        if (oldName.toLowerCase() !== name.toLowerCase()) {
+          await deletePayer(oldName);
+          await createPayer(name, aliases);
+          setStatus(`Renamed "${oldName}" → "${name}".`);
+        } else {
+          await updatePayer(oldName, aliases);
+          setStatus(`Updated "${name}".`);
+        }
+        await loadPayersFromServer();
+        const newIdx = payers.findIndex(p => p.name === name);
+        if (newIdx >= 0) {
+          selectedIndex = newIdx;
+          loadPayerIntoForm(newIdx);
+          showForm(true);
+          renderList();
+          updateModeIndicator();
+        }
+      }
+    } catch (err) {
+      setStatus('Error: ' + err.message, true);
+    }
+  }
+
+  async function deleteCurrentPayer() {
+    if (isNew) {
+      setStatus('Cannot delete a new payer that is not saved yet.', true);
+      return;
+    }
+    if (selectedIndex < 0 || selectedIndex >= payers.length) {
+      setStatus('No payer selected.', true);
+      return;
+    }
+    const name = payers[selectedIndex].name || '(unnamed)';
+    if (!confirm(`Delete payer "${name}"?`)) return;
+    try {
+      await deletePayer(name);
+      setStatus(`Deleted "${name}".`);
+      await loadPayersFromServer();
+      // After deletion, clear selection and hide form
+      selectedIndex = -1;
+      originalName = '';
+      insuranceNameInput.value = '';
+      aliasesInput.value = '';
+      isNew = false;
+      showForm(false);
+      updateModeIndicator();
+      renderList();
+    } catch (err) {
+      setStatus('Error: ' + err.message, true);
+    }
+  }
+
+  function startNewPayer() {
+    insuranceNameInput.value = '';
+    aliasesInput.value = '';
+    selectedIndex = -1;
+    originalName = '';
+    isNew = true;
+    showForm(true);
+    updateModeIndicator();
+    renderList();
+    setStatus('Enter new payer details, then click "Create".');
+    insuranceNameInput.focus();
+  }
+
+  // ---------- event listeners ----------
+  updateBtn.addEventListener('click', saveCurrentPayer);
+  deleteBtn.addEventListener('click', deleteCurrentPayer);
+  addBtn.addEventListener('click', startNewPayer);
+  cancelBtn.addEventListener('click', cancelNewPayer);
+  refreshBtn.addEventListener('click', loadPayersFromServer);
+
+  // ---------- init ----------
+  loadPayersFromServer();
+</script>
+</body>
+</html>
