@@ -408,7 +408,6 @@
                             <span class="badge-count" id="recordCounter"><i class="bi bi-database"></i> 0 records</span>
                             <div class="spacer"></div>
                             <button class="btn btn-primary" id="approveBtn"><i class="bi bi-check2-circle"></i> Approve &amp; Next</button>
-                            <button class="btn btn-danger" id="skipBtn" style="display:none;"><i class="bi bi-x-circle"></i> Skip</button>
                             <span id="actionToast" class="toast-msg"></span>
                         </div>
                     </div>
@@ -464,7 +463,6 @@
         };
 
         const approveBtn = document.getElementById('approveBtn');
-        const skipBtn = document.getElementById('skipBtn');
         const recordCounter = document.getElementById('recordCounter');
         const actionToast = document.getElementById('actionToast');
 
@@ -649,10 +647,10 @@
             } catch (err) {
                 console.error('PDF render error:', err);
                 pdfContainer.innerHTML = `
-                    <div class="no-pdf-message" style="color:var(--rose);">
-                        Failed to render PDF: ${err.message}
-                    </div>
-                `;
+                        <div class="no-pdf-message" style="color:var(--rose);">
+                            Failed to render PDF: ${err.message}
+                        </div>
+                    `;
             }
         }
 
@@ -698,7 +696,6 @@
             currentIndex = 0;
 
             approveBtn.disabled = true;
-            skipBtn.style.display = 'none';
 
             while (currentIndex < total) {
                 const item = selectedFiles[currentIndex];
@@ -733,7 +730,6 @@
                 }
 
                 if (!extractionSuccess) {
-                    // Show error toast and move on
                     showToast(`Failed: ${file.name} – ${errorMsg}`, false);
                     bulkResults.push({ filename: file.name, status: 'failed' });
                     item.status = 'failed';
@@ -767,26 +763,17 @@
 
                 approveBtn.disabled = false;
                 approveBtn.textContent = '✅ Approve & Next';
-                skipBtn.style.display = 'inline-block';
-                skipBtn.textContent = '⏭️ Skip';
 
                 waitingForApproval = true;
                 const action = await new Promise((resolve) => {
                     const onApprove = () => {
                         approveBtn.disabled = true;
-                        skipBtn.style.display = 'none';
                         resolve('approve');
                     };
-                    const onSkip = () => {
-                        approveBtn.disabled = true;
-                        skipBtn.style.display = 'none';
-                        resolve('skip');
-                    };
                     approveBtn.onclick = onApprove;
-                    skipBtn.onclick = onSkip;
                 });
 
-                // Process action
+                // Process approval
                 if (action === 'approve') {
                     const record = getCurrentRecordFromLedger();
                     const duplicate = submittedRecords.some(r =>
@@ -815,10 +802,6 @@
                     }
                     bulkResults.push({ filename: file.name, status: 'approved' });
                     item.status = 'approved';
-                } else { // skip
-                    bulkResults.push({ filename: file.name, status: 'skipped' });
-                    item.status = 'skipped';
-                    showToast('⏭️ Skipped.', false);
                 }
 
                 // Clear preview and ledger
@@ -839,7 +822,6 @@
             const approvedCount = bulkResults.filter(r => r.status === 'approved').length;
             showToast(`Completed. ${approvedCount} approved.`);
             approveBtn.disabled = true;
-            skipBtn.style.display = 'none';
         }
 
         function updateFileList() {
@@ -857,11 +839,11 @@
                 else if (item.status === 'approved') cls += ' approved';
                 else if (item.status === 'skipped') cls += ' done';
                 return `
-                    <div class="file-item">
-                        <span>${item.file.name}</span>
-                        <span class="${cls}">${item.status || 'pending'}</span>
-                    </div>
-                `;
+                        <div class="file-item">
+                            <span>${item.file.name}</span>
+                            <span class="${cls}">${item.status || 'pending'}</span>
+                        </div>
+                    `;
             }).join('');
             extractAllBtn.disabled = false;
         }
@@ -879,7 +861,6 @@
             clearPreview();
             progressMsg.textContent = '';
             approveBtn.disabled = true;
-            skipBtn.style.display = 'none';
         });
 
         // Extract All
@@ -944,7 +925,6 @@
                 // Set up approve button (single file mode)
                 approveBtn.textContent = '✅ Approve';
                 approveBtn.disabled = false;
-                skipBtn.style.display = 'none';
                 approveBtn.onclick = async function() {
                     const record = getCurrentRecordFromLedger();
                     const duplicate = submittedRecords.some(r =>
@@ -1015,7 +995,6 @@
             pageInfo.textContent = 'Bulk mode';
             progressMsg.textContent = '';
             approveBtn.disabled = true;
-            skipBtn.style.display = 'none';
         });
 
         uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
