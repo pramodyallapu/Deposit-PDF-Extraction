@@ -217,6 +217,7 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
             cpt_count=cpt.get("cpt_count", 0),
             cpt_total_occurrences=cpt.get("cpt_total_occurrences", 0),
             extraction_confidence=cpt.get("extraction_confidence", 0.0),
+            cpt_occurrences=cpt.get("code_frequencies", {}),
         ),
         meta=ExtractionMeta(
             total_pages=meta.get("total_pages", len(pages)),

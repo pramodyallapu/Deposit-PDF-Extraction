@@ -14,6 +14,7 @@ class CPTResult(BaseModel):
     cpt_count: int
     cpt_total_occurrences: int
     extraction_confidence: float
+    cpt_occurrences: dict[str, int]
 
 
 class ExtractionMeta(BaseModel):
