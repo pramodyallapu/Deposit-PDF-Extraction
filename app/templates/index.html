@@ -342,9 +342,9 @@
                     <!-- Upload area -->
                     <div class="upload-area" id="uploadArea">
                         <i class="bi bi-cloud-arrow-up"></i>
-                        <strong>Drop your PDFs here</strong>
+                        <strong>Drop your PDFs or text files here</strong>
                         <p class="hint">or click to browse (multiple allowed)</p>
-                        <input type="file" id="fileInput" accept=".pdf" multiple />
+                        <input type="file" id="fileInput" accept=".pdf,.txt,.text" multiple />
                     </div>
                     <div id="uploadStatus"></div>
 
@@ -892,28 +892,39 @@
             hideError();
             uploadStatus.textContent = `Selected: ${file.name}`;
 
-            const reader = new FileReader();
-            reader.onload = async function(e) {
-                const pdfData = e.target.result;
-                try {
+            const isText = file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.text');
+            if (isText) {
+                // Read text file and display content
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const content = e.target.result;
+                    pdfContainer.innerHTML = `<pre style="white-space:pre-wrap;padding:16px;font-family:monospace;font-size:0.85rem;background:white;border-radius:4px;max-height:100%;overflow:auto;">${escapeHtml(content)}</pre>`;
+                    pageInfo.textContent = 'Text file (1 page)';
+                };
+                reader.readAsText(file);
+            } else {
+                // PDF: render preview
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    const pdfData = e.target.result;
                     await renderPdfPage(pdfData, 1, 1.5);
-                } catch (err) {
-                    showError('Failed to render PDF preview: ' + err.message);
-                }
-            };
-            reader.readAsArrayBuffer(file);
+                };
+                reader.readAsArrayBuffer(file);
+            }
 
+            // Perform extraction (same for both)
             spinner.classList.add('show');
             spinnerMsg.textContent = `Extracting ${file.name}…`;
             try {
                 const data = await extractSingleFile(file);
+
+                // ---- Populate ledger with extracted data ----
+                const cpt = data.cpt_codes;
                 setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
                 setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
                 setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
                 fields.insuranceName.value = data.insurance_name.value || '';
                 fields.practiceName.value = data.practice_name.value || '';
-
-                const cpt = data.cpt_codes;
                 fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
                     cpt.cpt_codes.map(c => `<span class="cpt-chip">${c}</span>`).join('') :
                     '<span class="no-stamp">None found</span>';
@@ -923,11 +934,14 @@
                 confs.cptConf.className = `stamp ${stampClass(cptPct)}`;
 
                 resultsSection.style.display = 'block';
+
+                // Auto-grow textareas
                 requestAnimationFrame(() => {
                     autoGrowTextarea(fields.insuranceName);
                     autoGrowTextarea(fields.practiceName);
                 });
 
+                // Set up approve button (single file mode)
                 approveBtn.textContent = '✅ Approve';
                 approveBtn.disabled = false;
                 skipBtn.style.display = 'none';
@@ -938,7 +952,12 @@
                         r.checkDate === record.checkDate &&
                         r.checkAmount === record.checkAmount
                     );
-                    if (duplicate) { showToast('Duplicate skipped.', false); resetLedger(); clearPreview(); return; }
+                    if (duplicate) {
+                        showToast('Duplicate skipped.', false);
+                        resetLedger();
+                        clearPreview();
+                        return;
+                    }
                     try {
                         await submitRecord(record);
                         submittedRecords.push({ ...record });
@@ -956,6 +975,11 @@
             } finally {
                 spinner.classList.remove('show');
             }
+        }
+
+        // Helper to escape HTML for text preview
+        function escapeHtml(unsafe) {
+            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
 
         // ---- Load records from server ----

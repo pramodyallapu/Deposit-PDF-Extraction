@@ -74,8 +74,8 @@ async def health():
 
 @app.post("/api/extract", response_model=ExtractionResponse)
 async def extract_single(file: UploadFile = File(...)):
-    if not (file.filename or "").lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    if not (file.filename or "").lower().endswith((".pdf", ".txt", ".text")):
+        raise HTTPException(status_code=400, detail="Only PDF or text files are supported.")
     tmp_path = await _save_upload_to_temp(file)
     try:
         loop = asyncio.get_event_loop()
@@ -93,8 +93,8 @@ async def extract_batch(files: list[UploadFile] = File(...)):
     failed = []
 
     async def process_one(upload: UploadFile):
-        if not (upload.filename or "").lower().endswith(".pdf"):
-            failed.append({"filename": upload.filename, "error": "Not a PDF file."})
+        if not (upload.filename or "").lower().endswith(".pdf",  ".txt", ".text"):
+            failed.append({"filename": upload.filename, "error": "Not a supported file type."})
             return
         tmp_path = await _save_upload_to_temp(upload)
         try:
@@ -185,10 +185,14 @@ async def delete_payer(name: str):
 
 EXECUTOR = ThreadPoolExecutor(max_workers=int(os.environ.get("EXTRACTION_WORKERS", 4)))
 
-def _extract_sync(pdf_path: str, filename: str) -> ExtractionResponse:
-    pages = extract_pages_from_pdf(pdf_path)
+def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
+
+    if is_text_file(filename):
+        pages = extract_pages_from_text_file(file_path)
+    else:
+        pages = extract_pages_from_pdf(file_path)
     if not pages:
-        raise ValueError("No pages could be extracted from this PDF (all methods failed).")
+        raise ValueError("No content could be extracted from this file.")
     result = extract_eob_data_from_pages(pages)
     meta = result.get("_meta", {})
 
@@ -231,3 +235,12 @@ async def _save_upload_to_temp(upload: UploadFile) -> str:
         os.remove(path)
         raise
     return path
+
+def is_text_file(filename: str) -> bool:
+    return filename.lower().endswith(('.txt', '.text'))
+
+def extract_pages_from_text_file(file_path: str) -> list:
+    """Read a text file and return a list with a single page dict."""
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    return [{"page_number": 1, "text": content, "method": "text"}]
