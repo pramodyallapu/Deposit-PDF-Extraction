@@ -8,19 +8,19 @@ from .cpt_extraction import date_pattern
 
 FIELD_ALIASES = {
     "check_number": [
-        ("Check/EFT No", 1.00), ("Check / EFT No", 1.00), ("Check EFT No", 1.00),
+        ("EPC Draft #", 1.00), ("Check/EFT No", 1.00), ("Check / EFT No", 1.00), ("Check EFT No", 1.00),
         ("Check No", 1.00), ("Check #", 1.00), ("Check Number", 1.00), ("CheckNumber", 1.00),
         ("Check No.", 0.98), ("Check No#", 0.98), ("Check Id",0.98), ("Payment Number", 0.95),
         ("EFT Trace Number", 0.98), ("EFTTraceNumber", 0.98), ("EFT Trace", 0.95),
         ("Trace Number", 0.95), ("Trace #", 0.90), ("Trace No", 0.90), ("Trace No.", 0.90),
         ("Reference Number", 0.75), ("Reference No", 0.75), ("Reference #", 0.70),
-        ("Reference No.", 0.70), ("Ref No", 0.65), ("Ref #", 0.65), ("EFT", 0.65),
+        ("Reference No.", 0.70), ("Ref No", 0.65), ("Ref #", 0.65), ("EFT#", 0.80),
     ],
     "check_date": [
         ("Payment/Check Date", 1.00), ("Payment / Check Date", 1.00),
         ("Check Date", 1.00), ("CheckDate", 1.00),
         ("Payment Date", 0.98), ("PaymentDate", 0.98),
-        ("EFT Date", 0.95), ("EFTDate", 0.95),
+        ("EFT Date", 0.95), ("EFTDate", 0.95), ("EFT", 0.92),
         ("Date Issued", 0.90), ("DateIssued", 0.90), ("Issued Date", 0.90),
         ("Remit Date", 0.80), ("RemitDate", 0.80), ("Printed", 0.80),
         ("Issue Date", 0.75), ("Issued", 0.70), ("Service Date", 0.60), ("ServiceDate", 0.60),
@@ -33,7 +33,7 @@ FIELD_ALIASES = {
         ("Net Payment", 0.95), ("NetPayment", 0.95),
         ("Amount Paid", 0.92), ("AmountPaid", 0.92),
         ("Total Paid", 0.85), ("TotalPaid", 0.85), ("Total Payment", 0.85),
-        ("Payment", 0.80), ("Paid", 0.70), ("Amount", 0.70), ("Trace Amount",0.70)
+        ("Payment", 0.80), ("Paid", 0.70), ("Amount", 0.95), ("Trace Amount",0.70)
     ],
     "practice_name": [
         ("Pay To", 0.90), ("PayTo", 0.90), ("Pay To:", 0.90), ("Payable To", 0.85),

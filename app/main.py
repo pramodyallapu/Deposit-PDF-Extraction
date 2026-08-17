@@ -22,7 +22,7 @@ import os
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -193,6 +193,13 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
         pages = extract_pages_from_pdf(file_path)
     if not pages:
         raise ValueError("No content could be extracted from this file.")
+
+    for page in pages:
+        print(f"\n--- Page {page['page_number']} ---")
+        print("method:", page["method"])
+        print("text:")
+        print(page["text"])
+        print("--- END PAGE ---")
     result = extract_eob_data_from_pages(pages)
     meta = result.get("_meta", {})
 
@@ -245,3 +252,40 @@ def extract_pages_from_text_file(file_path: str) -> list:
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     return [{"page_number": 1, "text": content, "method": "text"}]
+
+# REPLACE the learning endpoints in main.py with these:
+
+@app.get("/api/learning/stats")
+async def get_learning_stats():
+    """Get learning system statistics."""
+    try:
+        from app.core.learning.learner import get_learning_engine
+        engine = get_learning_engine()
+        return engine.get_stats()
+    except Exception as e:
+        return {"error": str(e), "total_corrections": 0, "total_patterns": 0}
+
+
+@app.get("/api/learning/patterns")
+async def get_learning_patterns(field: Optional[str] = None, limit: int = 50):
+    """Get all learned patterns."""
+    try:
+        from app.core.learning.learner import get_learning_engine
+        engine = get_learning_engine()
+        patterns = engine.get_all_patterns(limit)
+        if field:
+            patterns = [p for p in patterns if p.get('field_name') == field]
+        return {"patterns": patterns}
+    except Exception as e:
+        return {"error": str(e), "patterns": []}
+
+
+@app.get("/api/learning/corrections")
+async def get_learning_corrections(limit: int = 100):
+    """Get recent corrections."""
+    try:
+        from app.core.learning.learner import get_learning_engine
+        engine = get_learning_engine()
+        return {"corrections": engine.get_corrections(limit)}
+    except Exception as e:
+        return {"error": str(e), "corrections": []}

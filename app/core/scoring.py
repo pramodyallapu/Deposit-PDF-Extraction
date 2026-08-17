@@ -193,7 +193,7 @@ def context_score(field_name, text):
             score += 0.15
     elif field_name == "check_amount":
         if AMOUNT_HINTS.search(text): score += 0.25
-        if re.search(r'[\$]', text): score += 0.10
+        if re.search(r'[\$]', text): score += 0.40
     elif field_name == "practice_name":
         if PRACTICE_HINTS.search(text): score += 0.25
         if re.search(r'\b(?:LLC|PLLC|PC|PA|Inc|Corp)\b', text, re.IGNORECASE): score += 0.10
@@ -206,13 +206,13 @@ def context_score(field_name, text):
     return score
 
 # 11. DIRECTION SCORE (unchanged)
-DIRECTION_SCORES = {"right": 1.00, "left": 0.75, "below": 0.85, "above": 0.80}
+DIRECTION_SCORES = {"right": 1.00, "left": 0.75, "below": 0.90, "above": 0.80}
 
 # 12. CANDIDATE SCORING (unchanged)
 def score_candidate(field_name, value, alias_weight, direction, distance, source_text, line_number, alias_line_number):
     score = 0.0
     score += alias_weight * 0.35
-    score += DIRECTION_SCORES.get(direction, 0.50) * 0.20
+    score += DIRECTION_SCORES.get(direction, 0.50) * 0.35
     distance_score = max(0.0, 1.0 - (distance / 80.0)) if direction in ("right", "left") else max(0.0, 1.0 - (distance / 5.0))
     score += distance_score * 0.15
     score += context_score(field_name, source_text) * 0.15
@@ -222,6 +222,7 @@ def score_candidate(field_name, value, alias_weight, direction, distance, source
         score += 0.20 if validate_date(value) else -0.40
     elif field_name == "check_amount":
         score += 0.20 if validate_amount(value) else -0.40
+        if re.search(r'[\$]', value): score += 0.20
     elif field_name == "practice_name":
         score += 0.15 if validate_practice_name(value) else -0.25
     elif field_name == "insurance_name":
