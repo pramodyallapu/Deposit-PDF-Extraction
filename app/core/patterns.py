@@ -14,7 +14,7 @@ FIELD_ALIASES = {
         ("EFT Trace Number", 0.98), ("EFTTraceNumber", 0.98), ("EFT Trace", 0.95),
         ("Trace Number", 0.95), ("Trace #", 0.90), ("Trace No", 0.90), ("Trace No.", 0.90),
         ("Reference Number", 0.75), ("Reference No", 0.75), ("Reference #", 0.70),
-        ("Reference No.", 0.70), ("Ref No", 0.65), ("Ref #", 0.65), ("EFT", 0.65),
+        ("Reference No.", 0.70), ("Ref No", 0.65), ("Ref #", 0.65), ("EFT", 0.65), ("EFT#", 0.70), ("EPC Draft #", 1.00), ("PAYDOLLARSCENTS", 0.70)
     ],
     "check_date": [
         ("Payment/Check Date", 1.00), ("Payment / Check Date", 1.00),
@@ -24,7 +24,7 @@ FIELD_ALIASES = {
         ("Date Issued", 0.90), ("DateIssued", 0.90), ("Issued Date", 0.90),
         ("Remit Date", 0.80), ("RemitDate", 0.80), ("Printed", 0.80),
         ("Issue Date", 0.75), ("Issued", 0.70), ("Service Date", 0.60), ("ServiceDate", 0.60),
-        ("Date of remittance",0.80), ("Dateofremittance",0.80)
+        ("Date of remittance",0.80), ("Dateofremittance",0.80), ("Checkwrite Date", 0.75)
     ],
     "check_amount": [
         ("Payment/Check Amount", 1.00), ("Payment / Check Amount", 1.00),
@@ -33,7 +33,7 @@ FIELD_ALIASES = {
         ("Net Payment", 0.95), ("NetPayment", 0.95),
         ("Amount Paid", 0.92), ("AmountPaid", 0.92),
         ("Total Paid", 0.85), ("TotalPaid", 0.85), ("Total Payment", 0.85),
-        ("Payment", 0.80), ("Paid", 0.70), ("Amount", 0.70), ("Trace Amount",0.70)
+        ("Payment", 0.80), ("Paid", 0.70), ("Amount", 0.85), ("Trace Amount",0.70)
     ],
     "practice_name": [
         ("Pay To", 0.90), ("PayTo", 0.90), ("Pay To:", 0.90), ("Payable To", 0.85),
@@ -78,7 +78,7 @@ FIELD_PATTERNS = {
 # 3. EOB CONTEXT
 
 
-CHECK_NUMBER_HINTS = re.compile(r"check|eft|trace|reference|payment|remittance|deposit", re.IGNORECASE)
+CHECK_NUMBER_HINTS = re.compile(r"eft|trace|reference|payment|remittance|deposit|epc|check", re.IGNORECASE)
 DATE_HINTS = re.compile(r"check|payment|eft|remit|issue|issued|date|service", re.IGNORECASE)
 AMOUNT_HINTS = re.compile(r"payment|check|paid|amount|net|total|remittance|balance", re.IGNORECASE)
 PRACTICE_HINTS = re.compile(r"provider|practice|billing|rendering|payee|pay\s*to", re.IGNORECASE)

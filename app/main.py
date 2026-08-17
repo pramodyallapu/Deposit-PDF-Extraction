@@ -205,7 +205,7 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
         )
 
     cpt = result.get("cpt_codes", {})
-    return ExtractionResponse(
+    response = ExtractionResponse(
         filename=filename,
         check_number=field("check_number"),
         check_date=field("check_date"),
@@ -224,6 +224,8 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
             header_pages_searched=meta.get("header_pages_searched", 0),
         ),
     )
+    # print("Response : ",response)
+    return response
 
 async def _save_upload_to_temp(upload: UploadFile) -> str:
     suffix = os.path.splitext(upload.filename or "")[1] or ".pdf"
