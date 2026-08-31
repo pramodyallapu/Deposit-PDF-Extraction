@@ -40,14 +40,18 @@ def alias_regex(alias: str):
     combined_pattern = f"(?:{pattern}|{pattern_without_spaces})"
     return re.compile(r"(?<![A-Za-z0-9])" + combined_pattern + r"(?![A-Za-z0-9])", re.IGNORECASE)
 
-def find_aliases(lines, field_name):
+def find_aliases(lines, field_name, aliases=None):
+    if aliases is None:
+        aliases = FIELD_ALIASES[field_name]          # unchanged default behavior
     matches = []
     for line_no, line in enumerate(lines):
-        for alias, weight in FIELD_ALIASES[field_name]:
+        for alias, weight in aliases:
             pattern = alias_regex(alias)
-            if not pattern: continue
+            if not pattern:
+                continue
             for match in pattern.finditer(line):
-                matches.append({"line": line_no, "start": match.start(), "end": match.end(), "alias": alias, "weight": weight, "matched_text": match.group(0)})
+                matches.append({"line": line_no, "start": match.start(), "end": match.end(),
+                                 "alias": alias, "weight": weight, "matched_text": match.group(0)})
     unique_matches = []
     seen = set()
     for match in matches:
@@ -137,9 +141,11 @@ def parse_amount(value: str):
 
 def validate_amount(value: str):
     if not isinstance(value, str): return False
+    if '.' not in value:
+        return False
     amount = parse_amount(value)
     if amount is None or amount < 0 or amount > 10_000_000: return False
-    if '.' in value and len(value.split('.')[-1]) != 2: return False
+    if len(value.split('.')[-1]) != 2: return False
     return True
 
 def validate_check_number(value: str):

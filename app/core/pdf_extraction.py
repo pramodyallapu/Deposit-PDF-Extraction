@@ -1,5 +1,5 @@
 import pdfplumber
-import fitz                 # PyMuPDF
+import pymupdf                 # PyMuPDF
 import PyPDF2
 import pytesseract
 import re
@@ -45,7 +45,7 @@ def _try_ocr_page(pdf_path, page_number):
 
 # ---------- Build corrected PDF in memory ----------
 def build_corrected_pdf(pdf_path, min_rotation_conf=1.0, dpi=150):
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
     rotations_to_apply = {}
     total_pages = len(doc)
 
@@ -59,7 +59,7 @@ def build_corrected_pdf(pdf_path, min_rotation_conf=1.0, dpi=150):
         return None
 
     print(f"Building in‑memory corrected PDF with {len(rotations_to_apply)} rotated pages...")
-    new_doc = fitz.open()
+    new_doc = pymupdf.open()
 
     for page_num in range(1, total_pages + 1):
         original_page = doc[page_num - 1]
@@ -105,9 +105,9 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
     with pdfplumber.open(pdfplumber_source) as plumber_pdf:
         # Open PyMuPDF (fitz) – handle both BytesIO and file path
         if isinstance(fitz_source, io.BytesIO):
-            mupdf_doc = fitz.open(stream=fitz_source, filetype="pdf")
+            mupdf_doc = pymupdf.open(stream=fitz_source, filetype="pdf")
         else:
-            mupdf_doc = fitz.open(fitz_source)
+            mupdf_doc = pymupdf.open(fitz_source)
 
         # Open PyPDF2 – handle both BytesIO and file path
         if isinstance(pypdf2_source, io.BytesIO):

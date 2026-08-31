@@ -222,9 +222,10 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
         meta=ExtractionMeta(
             total_pages=meta.get("total_pages", len(pages)),
             header_pages_searched=meta.get("header_pages_searched", 0),
+            candidate_searched = meta.get("candidate_page_numbers",0)
         ),
     )
-    # print("Response : ",response)
+    print("Response : ",response)
     return response
 
 async def _save_upload_to_temp(upload: UploadFile) -> str:
