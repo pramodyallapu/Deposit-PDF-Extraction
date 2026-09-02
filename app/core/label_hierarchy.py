@@ -20,6 +20,8 @@ FIELD_LABEL_HIERARCHY = {
             ("Check/EFT No", 1.00),
             ("Check / EFT No", 1.00),
             ("Check EFT No", 1.00),
+            ("EFT#", 0.80),
+            ("Trace Number", 0.60),
         ],
         "level_2": [
             # Strong secondary options
@@ -102,7 +104,11 @@ FIELD_LABEL_HIERARCHY = {
             ("Check Amount", 1.00),
             ("CheckAmount", 1.00),
             ("Net Payment Amount", 1.00),
-            ("Amount Paid", 1.00)
+            ("Amount Paid", 1.00),
+            ("PAYDOLLARSCENTS", 0.80),
+            ("PAY DOLLARS CENTS", 0.80),
+            ("Card Value", 0.40),
+            ("Trace Amount", 0.60)
         ],
         "level_2": [
             # Strong secondary
@@ -112,17 +118,17 @@ FIELD_LABEL_HIERARCHY = {
             ("NetPayment", 0.95),
             ("Amount Paid", 0.92),
             ("AmountPaid", 0.92),
+            ("Amount", 0.85),
         ],
         "level_3": [
             # Fallback (generic/ambiguous)
             ("Total Paid", 0.85),
             ("TotalPaid", 0.85),
             ("Total Payment", 0.85),
-            ("Amount", 0.85),
             ("Payment", 0.80),
             ("Paid", 0.70),
             ("Trace Amount", 0.70),
-            ("Net Claim Payment Amount", 0.70)
+            ("Net Claim Payment Amount", 0.70),
         ],
         "rationale": "Check Amount is unambiguous. Avoid generic 'Amount' (could be service amount)."
     },

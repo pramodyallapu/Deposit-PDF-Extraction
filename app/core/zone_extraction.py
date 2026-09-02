@@ -11,9 +11,80 @@ import re
 CHECK_INSTRUMENT_SIGNALS = re.compile(
     r"\bVOID AFTER\b|\bNON[- ]NEGOTIABLE\b|\bDRAFT NO\b|\bDRAFT DATE\b|"
     r"\bPAYABLE THROUGH DRAFT\b|\bPAY(?:ABLE)?\s*TO\s*THE\s*ORDER\s*OF\b|"
-    r"\bELECTRONIC PAYMENT CLEARINGHOUSE\b|\bMICR\b|\bACH TRACE\b",
+    r"\bELECTRONIC PAYMENT CLEARINGHOUSE\b|\bMICR\b|\bACH TRACE\b|"
+    r"\bISSUE DATE\b|\bAMOUNT\b|\bDOLLARS\b|\bPAY\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b|"
+    r"\bPAYMENT INFORMATION\b|\bEXPLANATIONS\b",
     re.IGNORECASE,
 )
+
+CHECK_AMOUNT_PATTERN = re.compile(r'(?<![\d.])\$+\s*[\d,]+\.\d{2}(?!\d)')
+
+AMOUNT_LABEL_PATTERN = re.compile(r"\bAMOUNT\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b")
+EXPLICIT_CHECK_AMOUNT_PATTERN = re.compile(
+    r"\b(?:PAYMENT\s*/?\s*CHECK|CHECK|NET\s+PAYMENT)\s*AMOUNT\b|"
+    r"\bAMOUNT\s+PAID\b|\bTRACE\b",
+    re.IGNORECASE,
+)
+DOLLAR_VALUE_PATTERN = re.compile(r"\$+\s*([\d,]+\.\d{2})(?!\d)", re.IGNORECASE,)
+
+
+def extract_amount_from_instrument_page(page_text: str) -> Dict:
+    """extract_amount_from_instrument_page
+    On a CONFIRMED check/draft instrument page, check_amount is simplified
+    to one deterministic rule: find the "AMOUNT" label, then take the first
+    value that carries an explicit '$' sign -- same line first, otherwise
+    the nearest line below. No alias cascade, no column/tie resolution: a
+    physical check/draft prints exactly one amount box, so none of that
+    machinery is needed, and it's exactly what let per-claim rows or
+    unrelated $ tables leak in on this page type.
+
+    Handles noisy padding like "$$$$4,420.00" (multiple leading $ used as
+    fraud-prevention filler) -- the regex only matches starting at the '$'
+    immediately adjacent to actual digits, so the padding is skipped
+    automatically.
+    """
+    lines = normalize_text(page_text).splitlines()
+
+    for i, line in enumerate(lines):
+        label_match = AMOUNT_LABEL_PATTERN.search(line)
+        if not label_match:
+            continue
+
+        # Same line: "AMOUNT: $4,420.00" style
+        same_line = DOLLAR_VALUE_PATTERN.search(line[label_match.end():])
+        if same_line:
+            return _instrument_amount_result(same_line.group(1), i, "same_line")
+
+        # Otherwise: nearest line below with a $-prefixed value
+        for offset in range(1, 6):
+            idx = i + offset
+            if idx >= len(lines):
+                break
+            below_match = DOLLAR_VALUE_PATTERN.search(lines[idx])
+            if below_match:
+                return _instrument_amount_result(below_match.group(1), idx, "below")
+        # This "AMOUNT" occurrence had no $ value nearby -- keep scanning in
+        # case the label appears again further down the page.
+
+    return _empty_field_result()
+
+
+def _instrument_amount_result(value: str, value_line: int, direction: str) -> Dict:
+    return {
+        "value": value,
+        "confidence": 0.95,
+        "alias_used": "Amount",
+        "direction": direction,
+        "line_number": value_line + 1,
+        "zone": None,
+        "label_level": None,
+        "page_number": None,          # filled in by the caller
+        "zone_confidence_boost": 0.0,
+        "original_score": 0.95,
+        "match_type": "instrument_amount_label",
+        "candidates_considered": 1,
+        "all_candidates": [],
+    }
 
 def is_check_instrument_page(text: str) -> bool:
     """
@@ -56,7 +127,7 @@ def get_zone_for_line(line_number: int, total_lines: int) -> str:
 
 def get_zone_confidence_boost(zone: str) -> float:
     """Footer summaries (check amount/date/number) are the most reliable."""
-    return {"footer": 0.30, "header": 0.05, "body": 0.00}.get(zone, 0.0)
+    return {"footer": 0.10, "header": 0.03, "body": 0.00}.get(zone, 0.0)
 
 
 def _page_search_order(total_pages: int) -> List[int]:
@@ -82,7 +153,18 @@ def extract_field_by_zone(pages, field_name, threshold=0.20):
             # statement-summary page, because this page is the actual
             # disbursement record -- the summary table's row may or may not
             # even represent a total.
-            ordered = sorted(instrument_pages, key=lambda p: p.get("page_number", 0), reverse=True)
+            ordered = sorted(instrument_pages, key=lambda p: p.get("page_number", 0))
+            if field_name == "check_amount":
+                first_page_text = normalize_text(pages[0].get("text", ""))
+                first_twenty_lines = "\n".join(first_page_text.splitlines()[:20])
+                if not EXPLICIT_CHECK_AMOUNT_PATTERN.search(first_twenty_lines):
+                    for page in ordered:
+                        result = extract_amount_from_instrument_page(page.get("text", ""))
+                        if result.get("value"):
+                            result["page_number"] = page.get("page_number")
+                            result["source_page_type"] = "check_instrument"
+                            return result
+
             result = _search_pages_by_level(ordered, field_name, threshold)
             if result["value"]:
                 result["source_page_type"] = "check_instrument"
@@ -127,24 +209,42 @@ def _search_pages_by_level(ordered_pages, field_name, threshold):
     return _empty_field_result()
 
 
+# A same-line "Label: $Value" hit (direction right/left) leaves zero ambiguity
+# about which value belongs to the label -- it's the strongest signal this
+# engine can produce. It should never lose to a zone-boosted guess pulled off
+# a table row, so it's checked first, on its own unboosted score.
+DIRECT_MATCH_MIN_SCORE = 0.90
+
+
 def _format_best_candidate(zone_candidates: List[ZoneCandidate], threshold: float) -> Dict:
     if not zone_candidates:
         return _empty_field_result()
 
-    boosted = [
-        (min(1.0, zc.candidate.score + zc.zone_confidence_boost), zc)
-        for zc in zone_candidates
+    direct_matches = [
+        zc for zc in zone_candidates
+        if zc.candidate.direction in ("right", "left") and zc.candidate.score >= DIRECT_MATCH_MIN_SCORE
     ]
+    if direct_matches:
+        direct_matches.sort(key=lambda zc: zc.candidate.score, reverse=True)
+        best_zc = direct_matches[0]
+        if best_zc.candidate.score >= threshold:
+            return _build_result(best_zc, best_zc.candidate.score, zone_candidates)
+
+    # No clean same-line match exists -- NOW zone position is a legitimate
+    # tiebreaker among candidates that are all somewhat ambiguous anyway.
+    boosted = [(min(1.0, zc.candidate.score + zc.zone_confidence_boost), zc) for zc in zone_candidates]
     boosted.sort(key=lambda x: x[0], reverse=True)
     best_score, best_zc = boosted[0]
-
     if best_score < threshold:
         return _empty_field_result()
+    return _build_result(best_zc, best_score, zone_candidates)
 
+
+def _build_result(best_zc: ZoneCandidate, final_score: float, all_zone_candidates: List[ZoneCandidate]) -> Dict:
     best = best_zc.candidate
     return {
         "value": best.value,
-        "confidence": round(best_score, 3),
+        "confidence": round(final_score, 3),
         "alias_used": best.alias_used,
         "direction": best.direction,
         "line_number": best.line_number + 1,
@@ -153,16 +253,17 @@ def _format_best_candidate(zone_candidates: List[ZoneCandidate], threshold: floa
         "page_number": best_zc.page_number,
         "zone_confidence_boost": round(best_zc.zone_confidence_boost, 3),
         "original_score": round(best.score, 3),
-        "candidates_considered": len(zone_candidates),
+        "match_type": "direct_same_line" if best.direction in ("right", "left") and best.score >= DIRECT_MATCH_MIN_SCORE else "positional",
+        "candidates_considered": len(all_zone_candidates),
         "all_candidates": [
             {
                 "value": zc.candidate.value, "score": round(zc.candidate.score, 3),
-                "boosted_score": round(s, 3), "alias": zc.candidate.alias_used,
-                "level": zc.label_level, "zone": zc.zone, "page": zc.page_number,
-                "direction": zc.candidate.direction, "line": zc.candidate.line_number + 1,
-                "distance": zc.candidate.distance, "source": zc.candidate.source_line,
+                "alias": zc.candidate.alias_used, "level": zc.label_level, "zone": zc.zone,
+                "page": zc.page_number, "direction": zc.candidate.direction,
+                "line": zc.candidate.line_number + 1, "distance": zc.candidate.distance,
+                "source": zc.candidate.source_line,
             }
-            for s, zc in boosted[:5]
+            for zc in sorted(all_zone_candidates, key=lambda z: z.candidate.score, reverse=True)[:5]
         ],
     }
 
@@ -191,3 +292,58 @@ def extract_all_fields_by_zone(pages: List[Dict]) -> Dict:
         "search_order": "level_1(all pages/zones) -> level_2 -> level_3, zone-boosted within each level",
     }
     return result
+
+def extract_check_instrument_amount(text: str):
+    """
+    Extract the check amount from the AMOUNT field.
+
+    Supports layouts where the amount is on the same line or on the
+    following line, including values such as:
+
+        AMOUNT $$$$4,420.00
+        AMOUNT
+        $$$$4,420.00
+        AMOUNT
+        $4,420.00
+    """
+    if not text:
+        return None
+
+    lines = text.splitlines()
+
+    for i, line in enumerate(lines):
+
+        if not re.search(r'\bAMOUNT\b', line, re.I):
+            continue
+
+        # --------------------------------------------------------
+        # 1. Amount on the same line as AMOUNT
+        # --------------------------------------------------------
+        match = CHECK_AMOUNT_PATTERN.search(line)
+
+        if match:
+            return match.group(0).replace(" ", "")
+
+        # --------------------------------------------------------
+        # 2. Amount on the following line
+        # --------------------------------------------------------
+        for next_idx in range(i + 1, min(i + 3, len(lines))):
+            next_line = lines[next_idx].strip()
+
+            if not next_line:
+                continue
+
+            match = CHECK_AMOUNT_PATTERN.search(next_line)
+
+            if match:
+                return match.group(0).replace(" ", "")
+
+            # Don't search through another field/header.
+            if re.search(
+                r'\b(?:ISSUE\s+DATE|CHECK\s+NUMBER|PAY|PAYABLE)\b',
+                next_line,
+                re.I
+            ):
+                break
+
+    return None
