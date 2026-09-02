@@ -78,7 +78,7 @@ PO_BOX_PATTERN = re.compile(r'\bP\.?O\.?\s*Box\b', re.I)
 # override the non-CPT-label guard below.
 STRONG_CPT_CONTEXT = re.compile(r'\bCPT\b|\bHCPCS\b|\bProc(?:edure)?\s*Code\b', re.I)
 
-# Broad/ambiguous context, used only for scoring/confidence - never to unlock a line.
+# Broad/ambiguous context, used only for confidence scoring - never to unlock a line.
 context_pattern = re.compile(r'CPT|Procedure|Proc|HCPCS|Code|Service|SVCS', re.I)
 
 non_cpt_pattern = re.compile(
@@ -90,6 +90,9 @@ non_cpt_pattern = re.compile(
     r'check\s*(?:no|number|#)?|fax|po\s*box|pcn|provider\s*id)\b', re.I
 )
 
+# CPT / HCPCS code pattern
+# Supports 5-digit CPT, 7-digit codes, HCPCS Level II (G0283), and modifiers (G0283GP).
+code_pattern = re.compile(r'\b([A-Z]\d{4}|\d{4}[A-Z]|\d{5}|\d{7})([A-Za-z]{0,5})\b', re.I)
 
 def is_lookalike_candidate(match, line_idx, lines):
     """
@@ -110,6 +113,10 @@ def is_lookalike_candidate(match, line_idx, lines):
     line = lines[line_idx]
     start, end = match.span(1)
     code = match.group(1)
+
+    # HCPCS/alphanumeric codes cannot be ZIP codes.
+    if not code.isdigit():
+        return False
 
     # --- 1. Direct ZIP+4 ---------------------------------------------------
     if len(code) == 5 and re.match(r'-\d{4}\b', line[end:]):
@@ -199,35 +206,38 @@ def extract_cpt_codes(text):
 
     lines = text.split('\n')
     cpt_candidates = []
-    code_pattern = re.compile(r'\b(\d{5}|\d{7})(?:[A-Za-z]{0,5})?\b')
 
     def add_candidate(match, line_idx, line, source, date=False, money=False,
                       date_adj=False, money_adj=False, context=False,
                       service=False, score=0, evidence=None):
         code = match.group(1)
+        modifier = match.group(2) or ''
         full_match = match.group(0)
-        modifier = full_match[len(code):]
         code_length = len(code)
+        is_numeric = code.isdigit()
 
-        try:
-            code_int = int(code)
-        except ValueError:
-            return
+        if is_numeric:
+            try:
+                code_int = int(code)
+            except ValueError:
+                return
 
-        if code_length == 5:
-            if not (100 <= code_int <= 99999 and code[0] != '0'):
+            if code_length == 5:
+                if not (100 <= code_int <= 99999 and code[0] != '0'):
+                    return
+            elif code_length == 7:
+                if not (1000000 <= code_int <= 9999999):
+                    return
+            else:
                 return
-        elif code_length == 7:
-            if not (1000000 <= code_int <= 9999999):
-                return
-        else:
+        elif not re.fullmatch(r'(?:[A-Z]\d{4}|\d{4}[A-Z]{1,5})', code, re.I):
             return
 
         cpt_candidates.append({
-            'code': code,
+            'code': code.upper(),
             'code_length': code_length,
-            'modifier': modifier,
-            'is_numeric': code.isdigit(),
+            'modifier': modifier.upper(),
+            'is_numeric': is_numeric,
             'line': line_idx + 1,
             'line_text': line.strip()[:100],
             'has_date_current': date,
@@ -255,7 +265,7 @@ def extract_cpt_codes(text):
 
         has_cpt_context = bool(context_pattern.search(line))          # weak - scoring only
         has_strong_context = bool(STRONG_CPT_CONTEXT.search(line))     # strong - can unlock guard
-        has_service_indicator = bool(re.search(r'SVCS|SERVICE|CODE|PROC|CPT', line, re.I))
+        has_service_indicator = bool(re.search(r'SVCS|SERVICE|CODE|PROC|CPT|HCPCS', line, re.I))
 
         # Negative-context guard: never treat a number as a CPT code if it's
         # immediately labeled as some other kind of ID (ZIP, account, member,
@@ -324,7 +334,7 @@ def extract_cpt_codes(text):
             has_money = bool(money_pattern.search(block_text))
             has_service_context = bool(re.search(
                 r'\b(?:service|medical|behavioral|treatment|autism|procedure|'
-                r'procedure\s*code|place|home|office|hospital)\b',
+                r'procedure\s*code|place|home|office|hospital|hcpcs|cpt)\b',
                 block_text, re.I
             ))
 
@@ -389,8 +399,11 @@ def extract_cpt_codes(text):
         unique_fallback = {}
         for candidate in cpt_candidates:
             key = (candidate['code'], candidate.get('modifier', ''))
-            if key not in unique_fallback or candidate.get('evidence_score', 0) > \
-                    unique_fallback[key].get('evidence_score', 0):
+            if (
+                key not in unique_fallback or
+                candidate.get('evidence_score', 0) >
+                unique_fallback[key].get('evidence_score', 0)
+            ):
                 unique_fallback[key] = candidate
 
         cpt_candidates = list(unique_fallback.values())
@@ -432,10 +445,19 @@ def extract_cpt_codes(text):
     # ============================================================
     # COUNT OCCURRENCES
     # ============================================================
-    code_counts = {
-        code: sum(code in line for line in lines)
-        for code in unique_codes
-    }
+    code_counts = {}
+
+    for code, details in code_details.items():
+        modifier = details.get('modifier', '')
+        full_code = code + modifier
+
+        count = 0
+        for line in lines:
+            for match in code_pattern.finditer(line):
+                if match.group(0).upper() == full_code.upper():
+                    count += 1
+
+        code_counts[code] = count
 
     # ============================================================
     # CALCULATE CONFIDENCE
