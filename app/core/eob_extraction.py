@@ -327,7 +327,12 @@ def get_candidate_pages(pages, header_page_count):
         return []
     count = min(header_page_count, total)
     idx = set(range(count))
-    idx.add(total - 1)                    # unconditional -- the actual fix
+    # For longer PDFs, include the last 3 pages unconditionally.
+    if total > 4:
+        idx.update(range(max(0, total - 3), total))
+    else:
+        # For 4 pages or fewer, include the last page.
+        idx.add(total - 1)
     return [pages[i] for i in sorted(idx)]
 
 def extract_eob_data_from_pages(pages):
