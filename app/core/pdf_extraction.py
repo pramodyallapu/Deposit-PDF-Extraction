@@ -22,80 +22,112 @@ def detect_page_rotation(pdf_path, page_number, dpi=150):
         print(f"OSD failed for page {page_number}: {e}")
         return None, 0.0
 
-# ---------- Helper extraction functions ----------
+# ---------- Transform word coordinates ----------
+def _transform_word(word, page_width, page_height, rotation):
+    x0, y0, x1, y1 = word[:4]
+    if rotation == 90:
+        nx0 = page_height - y1
+        ny0 = x0
+        nx1 = page_height - y0
+        ny1 = x1
+    elif rotation == 180:
+        nx0 = page_width - x1
+        ny0 = page_height - y1
+        nx1 = page_width - x0
+        ny1 = page_height - y0
+    elif rotation == 270:
+        nx0 = y0
+        ny0 = page_width - x1
+        nx1 = y1
+        ny1 = page_width - x0
+    else:
+        return word
+    return (nx0, ny0, nx1, ny1) + tuple(word[4:])
+
+# ---------- Build readable text from transformed words ----------
+def _words_to_text(words, y_tolerance=4):
+    if not words:
+        return ""
+    words = sorted(words, key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+    lines = []
+    for word in words:
+        x0, y0, x1, y1 = word[:4]
+        center_y = (y0 + y1) / 2
+        best_line = None
+        best_diff = float("inf")
+        for line in lines:
+            diff = abs(center_y - line["center_y"])
+            if diff <= y_tolerance and diff < best_diff:
+                best_line = line
+                best_diff = diff
+        if best_line is None:
+            lines.append({"center_y": center_y, "words": [word]})
+        else:
+            best_line["words"].append(word)
+            centers = [(w[1] + w[3]) / 2 for w in best_line["words"]]
+            best_line["center_y"] = sum(centers) / len(centers)
+    lines.sort(key=lambda line: line["center_y"])
+    output = []
+    for line in lines:
+        line["words"].sort(key=lambda w: w[0])
+        output.append(" ".join(w[4] for w in line["words"]))
+    return "\n".join(output)
+
+# ---------- PyMuPDF extraction ----------
+def _try_pymupdf_page(doc, page_number, rotation=0):
+    page = doc[page_number - 1]
+    words = page.get_text("words", sort=False)
+    if not words:
+        return ""
+    if rotation:
+        width = page.rect.width
+        height = page.rect.height
+        words = [_transform_word(w, width, height, rotation) for w in words]
+    return _words_to_text(words)
+
+# ---------- pdfplumber extraction ----------
 def _try_pdfplumber_page(pdf, page_number):
     page = pdf.pages[page_number - 1]
     return page.extract_text(layout=True) or ""
 
-
-def _try_pymupdf_page(doc, page_number):
-    page = doc[page_number - 1]
-    return page.get_text("text", sort=True)or ""
-
-
+# ---------- PyPDF2 extraction ----------
 def _try_pypdf2_page(reader, page_number):
     page = reader.pages[page_number - 1]
     return page.extract_text() or ""
 
-def _try_ocr_page(pdf_path, page_number):
+# ---------- OCR fallback ----------
+def _try_ocr_page(pdf_path, page_number, rotation=0):
     images = convert_from_path(pdf_path, dpi=300, first_page=page_number, last_page=page_number)
     if not images:
         return ""
-    return pytesseract.image_to_string(images[0])
+    image = images[0]
+    if rotation:
+        image = image.rotate(-rotation, expand=True)
+    return pytesseract.image_to_string(image)
 
-# ---------- Build corrected PDF in memory ----------
-def build_corrected_pdf(pdf_path, min_rotation_conf=1.0, dpi=150):
-    doc = pymupdf.open(pdf_path)
-    rotations_to_apply = {}
-    total_pages = len(doc)
-
-    for page_num in range(1, total_pages + 1):
-        angle, conf = detect_page_rotation(pdf_path, page_num, dpi)
-        if angle is not None and conf >= min_rotation_conf and angle != 0:
-            rotations_to_apply[page_num] = angle
-
-    if not rotations_to_apply:
-        doc.close()
-        return None
-
-    print(f"Building in‑memory corrected PDF with {len(rotations_to_apply)} rotated pages...")
-    new_doc = pymupdf.open()
-
-    for page_num in range(1, total_pages + 1):
-        original_page = doc[page_num - 1]
-        new_page = new_doc.new_page(width=original_page.rect.width,
-                                    height=original_page.rect.height)
-        new_page.show_pdf_page(new_page.rect, doc, page_num - 1)
-
-        if page_num in rotations_to_apply:
-            detected_angle = rotations_to_apply[page_num]
-            correction = detected_angle % 360
-            new_page.set_rotation(correction)
-            print(f"  Page {page_num}: applied rotation {correction}° (corrects {detected_angle}°)")
-
-    pdf_bytes = io.BytesIO()
-    new_doc.save(pdf_bytes)
-    new_doc.close()
-    doc.close()
-    pdf_bytes.seek(0)
-    return pdf_bytes
-
-# ---------- Main extraction with automatic correction ----------
+# ---------- Main extraction ----------
 def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=150):
-    corrected_pdf_bytes = build_corrected_pdf(pdf_path, min_rotation_conf, dpi)
+    print("Detecting page rotations...")
+    page_rotations = {}
+    rotation_confidences = {}
+    temp_doc = pymupdf.open(pdf_path)
+    total_pages = len(temp_doc)
+    temp_doc.close()
 
-    # Create input sources
-    if corrected_pdf_bytes is not None:
-        print("Using in‑memory corrected PDF for extraction.")
-        pdf_data = corrected_pdf_bytes.getvalue()
-        # Each library needs its own BytesIO object to avoid position conflicts
-        pdfplumber_source = io.BytesIO(pdf_data)
-        fitz_source = io.BytesIO(pdf_data)
-        pypdf2_source = io.BytesIO(pdf_data)
+    for page_number in range(1, total_pages + 1):
+        angle, confidence = detect_page_rotation(pdf_path, page_number, dpi)
+        if angle is not None and confidence >= min_rotation_conf and angle != 0:
+            page_rotations[page_number] = angle % 360
+            rotation_confidences[page_number] = confidence
+            print(f"Page {page_number}: detected rotation {angle}° (confidence {confidence:.2f})")
+
+    if page_rotations:
+        print(f"Detected rotations on {len(page_rotations)} page(s).")
+        print("Using ORIGINAL PDF for text extraction; rotating text coordinates only.")
     else:
         print("No rotation needed – using original PDF.")
-        with open(pdf_path, "rb") as f:
-            pdf_data = f.read()
+    with open(pdf_path, "rb") as f:
+        pdf_data = f.read()
 
     # Give each library its own independent stream
     pdfplumber_source = io.BytesIO(pdf_data)
@@ -108,14 +140,8 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
     try:
         # Open all PDF engines from independent in-memory streams
         with pdfplumber.open(pdfplumber_source) as plumber_pdf:
-            mupdf_doc = pymupdf.open(
-                stream=fitz_source,
-                filetype="pdf"
-            )
-
-            pypdf2_reader = PyPDF2.PdfReader(
-                pypdf2_source
-            )
+            mupdf_doc = pymupdf.open(stream=fitz_source, filetype="pdf")
+            pypdf2_reader = PyPDF2.PdfReader(pypdf2_source)
 
             plumber_count = len(plumber_pdf.pages)
             mupdf_count = len(mupdf_doc)
@@ -129,56 +155,57 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
             page_count = max( plumber_count, mupdf_count, pypdf2_count)
 
             print("Total pages to process:", page_count)
-        for page_number in range(1, page_count + 1):
-            text = ""
-            method = None
-            # ----- 1. Try PyMuPDF -----
-            try:
-                text = _try_pymupdf_page(mupdf_doc, page_number)
-                if text.strip() and len(text.strip()) >= min_chars:
-                    method = "PyMuPDF"
-            except Exception as e:
-                print(f"Page {page_number}: PyMuPDF failed: {e}")
-            # ----- 2. Try pdfplumber -----
-            if not method:
+
+            for page_number in range(1, page_count + 1):
+                text = ""
+                method = None
+                rotation = page_rotations.get(page_number, 0)
+
+                # ----- 1. PyMuPDF -----
                 try:
-                    text = _try_pdfplumber_page(plumber_pdf, page_number)
+                    text = _try_pymupdf_page(mupdf_doc, page_number, rotation)
                     if text.strip() and len(text.strip()) >= min_chars:
-                        method = "pdfplumber"
+                        method = "PyMuPDF"
                 except Exception as e:
-                    print(f"Page {page_number}: pdfplumber failed: {e}")
-            # ----- 3. Try PyPDF2 -----
-            if not method:
-                try:
-                    text = _try_pypdf2_page(pypdf2_reader, page_number)
-                    if text.strip() and len(text.strip()) >= min_chars:
-                        method = "PyPDF2"
-                except Exception as e:
-                    print(f"Page {page_number}: PyPDF2 failed: {e}")
-            # ----- 4. Fallback to OCR -----
-            if not method:
-                try:
-                    print(f"Page {page_number}: no text layer or too short, running OCR...")
-                    text = _try_ocr_page(pdf_path, page_number)  # original file path for image conversion
-                    if text.strip():
-                        method = "OCR"
-                except Exception as e:
-                    print(f"Page {page_number}: OCR failed: {e}")
-            if not method:
-                print(f"Page {page_number}: ALL methods failed.")
-                method = "none"
-            pages.append({"page_number": page_number, "text": text, "method": method})
-            methods_used.append(method)
-        # Close PyMuPDF if it was opened from BytesIO
-        if isinstance(fitz_source, io.BytesIO):
+                    print(f"Page {page_number}: PyMuPDF failed: {e}")
+                # ----- 2. pdfplumber -----
+                if not method:
+                    try:
+                        text = _try_pdfplumber_page(plumber_pdf, page_number)
+                        if text.strip() and len(text.strip()) >= min_chars:
+                            method = "pdfplumber"
+                    except Exception as e:
+                        print(f"Page {page_number}: pdfplumber failed: {e}")
+                # ----- 3. PyPDF2 -----
+                if not method:
+                    try:
+                        text = _try_pypdf2_page(pypdf2_reader, page_number)
+                        if text.strip() and len(text.strip()) >= min_chars:
+                            method = "PyPDF2"
+                    except Exception as e:
+                        print(f"Page {page_number}: PyPDF2 failed: {e}")
+                # ----- 4. OCR -----
+                if not method:
+                    try:
+                        print(f"Page {page_number}: no usable text layer, running OCR...")
+                        text = _try_ocr_page(pdf_path, page_number, rotation)
+                        if text.strip():
+                            method = "OCR"
+                    except Exception as e:
+                        print(f"Page {page_number}: OCR failed: {e}")
+                if not method:
+                    print(f"Page {page_number}: ALL methods failed.")
+                    method = "none"
+                pages.append({ "page_number": page_number, "text": text, "method": method, "rotation": rotation})
+                methods_used.append(method)
+
             mupdf_doc.close()
     finally:
         # Explicitly close all streams
         pdfplumber_source.close()
         fitz_source.close()
         pypdf2_source.close()
-    # Extraction method summary
-    breakdown = { method: methods_used.count(method) for method in set(methods_used)}
 
+        breakdown = {method: methods_used.count(method) for method in set(methods_used)}
     print(f"Method breakdown: {breakdown}")
     return pages
