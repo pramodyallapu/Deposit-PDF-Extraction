@@ -24,20 +24,23 @@ FIX SUMMARY (vs original):
      and let the address/ID number through untouched.
    - Even with STRONG context present, the address-shape check still runs (a real CPT
      label essentially never coincides with a full postal address line).
+3. Generic candidate classification is added:
+   - Strong procedure candidates can suppress weak identifier candidates on the same
+     logical record.
+   - Multiple validated CPTs belonging to one logical service record count as ONE record.
+   - Unique CPT codes are still returned individually.
+"""
+
+"""CPT code extraction: requires date+money context or explicit CPT/procedure labeling,
+to avoid matching every 5-digit look-alike number (account numbers, ZIP codes, etc.) as a CPT code.
 """
 import re
 from collections import Counter
 
-
 # 17. CPT CODE EXTRACTION (5-DIGIT AND 7-DIGIT CPT CODES)
-
-# Date pattern: MM/DD/YYYY, MM/DD/YY, etc.
 date_pattern = re.compile(
-    r'(?:\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})|'
-    r'(?:\b\d{6}\b)|'
-    # r'(?:\b\d{8}\b)|'
-    r'(?:[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4})',
-    re.IGNORECASE
+    r'(?:\d{1,2}[\/.*-]\d{1,2}[\/.*-]\d{2,4})|(?:\b\d{6}\b)|(?:[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4})',
+    re.I
 )
 
 # Money pattern: $123.45, 123.45, 1,234.56, etc.
@@ -82,12 +85,11 @@ STRONG_CPT_CONTEXT = re.compile(r'\bCPT\b|\bHCPCS\b|\bProc(?:edure)?\s*Code\b', 
 context_pattern = re.compile(r'CPT|Procedure|Proc|HCPCS|Code|Service|SVCS', re.I)
 
 non_cpt_pattern = re.compile(
-    r'\b(?:zip|acct|account|member\s*id|group\s*(?:no|number|#)?|'
-    r'npi|tax\s*id|phone|ssn|ein|policy\s*(?:no|number|#)?|'
-    r'claim\s*(?:no|number|#)?|reference\s*(?:no|number|#)?|'
-    r'confirmation\s*(?:no|number|#)?|batch\s*(?:no|number|#)?|'
-    r'control\s*(?:no|number|#)?|invoice\s*(?:no|number|#)?|'
-    r'check\s*(?:no|number|#)?|fax|po\s*box|pcn|provider\s*id)\b', re.I
+    r'\b(?:zip|acct|account|member\s*id|group\s*(?:no|number|#)?|npi|tax\s*id|phone|ssn|ein|'
+    r'policy\s*(?:no|number|#)?|claim\s*(?:no|number|#)?|reference\s*(?:no|number|#)?|'
+    r'confirmation\s*(?:no|number|#)?|batch\s*(?:no|number|#)?|control\s*(?:no|number|#)?|'
+    r'line\s*(?:ctrl|control|no|number|#)?|invoice\s*(?:no|number|#)?|check\s*(?:no|number|#)?|'
+    r'fax|po\s*box|pcn|provider\s*id)\b', re.I
 )
 
 # CPT / HCPCS code pattern
@@ -123,14 +125,14 @@ def is_lookalike_candidate(match, line_idx, lines):
         return True
 
     before = line[:start]
-    after = line[end:]
 
     # --- 2. Explicit non-CPT label immediately before -----------------------
     if re.search(
-        r'\b(?:zip(?:\s*code)?|acct|account|member\s*id|group\s*(?:no|number|#)?|'
-        r'npi|tax\s*id|phone|ssn|ein|policy\s*(?:no|number|#)?|claim\s*(?:no|number|#)?|'
+        r'\b(?:zip(?:\s*code)?|acct|account|member\s*id|group\s*(?:no|number|#)?|npi|tax\s*id|'
+        r'phone|ssn|ein|policy\s*(?:no|number|#)?|claim\s*(?:no|number|#)?|'
         r'reference\s*(?:no|number|#)?|confirmation\s*(?:no|number|#)?|'
-        r'batch\s*(?:no|number|#)?|control\s*(?:no|number|#)?|invoice\s*(?:no|number|#)?|'
+        r'batch\s*(?:no|number|#)?|control\s*(?:no|number|#)?|'
+        r'line\s*(?:ctrl|control|no|number|#)?|invoice\s*(?:no|number|#)?|'
         r'check\s*(?:no|number|#)?|fax|pcn|provider\s*id)\s*[:#-]?\s*$',
         before, re.I
     ):
@@ -155,9 +157,8 @@ def is_lookalike_candidate(match, line_idx, lines):
 
     # Generic address/location keywords anywhere earlier on the line.
     if re.search(
-        r'\b(?:city|state|street|road|rd|avenue|ave|'
-        r'boulevard|blvd|drive|dr|lane|ln|highway|hwy|'
-        r'address|mailing|location)\b',
+        r'\b(?:city|state|street|road|rd|avenue|ave|boulevard|blvd|drive|dr|'
+        r'lane|ln|highway|hwy|address|mailing|location)\b',
         before, re.I
     ):
         return True
@@ -179,26 +180,109 @@ def is_lookalike_candidate(match, line_idx, lines):
 
     return False
 
+def has_procedure_structure(match, line):
+    before = line[:match.start()]
+    after = line[match.end():]
+    modifier = match.group(2) or ''
+
+    if STRONG_CPT_CONTEXT.search(before):
+        return True
+
+    if re.search(r'(?:CPT|HCPCS|PROC(?:EDURE)?|CODE)\s*[:#-]\s*$', before, re.I):
+        return True
+
+    if re.match(r'\s*/\s*[A-Za-z0-9]{0,5}\s*/\s*\d+(?:\.\d+)?', after):
+        return True
+
+    if re.match(r'\s*/\s*(?:[A-Za-z0-9]{1,5})\s*(?:/|\b)', after):
+        return True
+
+    return bool(modifier)
+
+def has_nearby_procedure_marker(match, line):
+    before = line[:match.start()]
+    after = line[match.end():]
+
+    if re.search(r'(?:HC|CPT|PROC|PROCEDURE)\s*[:#-]?\s*$', before, re.I):
+        return True
+
+    if re.search(r'^\s*/\s*[A-Za-z0-9]{0,5}\s*/\s*\d+(?:\.\d+)?', after):
+        return True
+
+    nearby = line[max(0, match.start() - 12):match.start() + 2]
+    return bool(re.search(r'\b(?:HC|CPT|PROC|PROCEDURE)\s*[:#-]?', nearby, re.I))
+
+def is_numeric_candidate_valid(match, line, line_idx, lines, all_matches, has_date, has_money):
+    code = match.group(1)
+    modifier = match.group(2) or ''
+
+    if not code.isdigit():
+        return True
+
+    if is_lookalike_candidate(match, line_idx, lines):
+        return False
+
+    if has_procedure_structure(match, line):
+        return True
+
+    if modifier:
+        return True
+
+    if len(all_matches) > 1:
+        return has_nearby_procedure_marker(match, line)
+
+    if has_date and has_money:
+        before = line[:match.start()]
+        after = line[match.end():]
+
+        if re.search(
+            r'\b(?:line|ctrl|control|claim|reference|ref|account|acct|check|batch|invoice|member|policy|provider|patient)\b',
+            before,
+            re.I
+        ):
+            return False
+
+        if re.match(r'\s*(?:[-:|])?\s*\d{1,2}[\/.*-]\d{1,2}[\/.*-]\d{2,4}\b', after):
+            return False
+
+        nearby = line[max(0, match.start() - 35):min(len(line), match.end() + 35)]
+        if re.search(
+            r'\b(?:service|procedure|proc|cpt|hcpcs|medical|treatment|behavioral|therapy|visit|office|hospital|surgery|diagnosis)\b',
+            nearby,
+            re.I
+        ):
+            return True
+    return False
+
+def build_logical_record_groups(cpt_candidates, lines):
+    """Group CPT candidates belonging to the same logical service record."""
+    record_groups = {}
+    active_anchor = None
+    last_candidate_idx = None
+
+    for candidate in sorted(cpt_candidates, key=lambda x: (x['line_idx'], x['code'])):
+        idx = candidate['line_idx']
+        line = lines[idx]
+        has_date = bool(date_pattern.search(line))
+        has_money = bool(money_pattern.search(line))
+
+        if active_anchor is None:
+            active_anchor = f"line:{idx}"
+        elif has_date or has_money:
+            active_anchor = f"line:{idx}"
+        elif last_candidate_idx is None or idx - last_candidate_idx > 2:
+            active_anchor = f"line:{idx}"
+
+        candidate['record_anchor'] = active_anchor
+        record_groups.setdefault(active_anchor, []).append(candidate)
+        last_candidate_idx = idx
+    return record_groups
 
 def extract_cpt_codes(text):
     """
-    Extract CPT codes using two approaches:
-
-    APPROACH 1 (existing):
-        - CPT/Procedure context on same line
-        OR
-        - date + money on same line
-
-    APPROACH 2 (fallback):
-        Used ONLY when approach 1 finds no CPT.
-        Handles table-based EOB layouts where date, CPT + modifier,
-        description and money are extracted onto separate physical
-        text lines but belong to the same logical record.
-
-    This preserves the existing extraction logic and adds a fallback
-    specifically for table layouts. Both approaches now share the same
-    lookalike-rejection logic (`is_lookalike_candidate`) so ZIP codes,
-    street addresses, and ID numbers are filtered consistently.
+    Extract CPT/HCPCS codes using two approaches.
+    Approach 1: Explicit CPT/HCPCS/procedure context or structured procedure values.
+    Approach 2: Fallback for multi-line/table records.
     """
     if not text or not isinstance(text, str):
         return {"cpt_codes": [], "cpt_count": 0, "cpt_total_occurrences": 0,
@@ -212,7 +296,6 @@ def extract_cpt_codes(text):
                       service=False, score=0, evidence=None):
         code = match.group(1)
         modifier = match.group(2) or ''
-        full_match = match.group(0)
         code_length = len(code)
         is_numeric = code.isdigit()
 
@@ -222,13 +305,10 @@ def extract_cpt_codes(text):
             except ValueError:
                 return
 
-            if code_length == 5:
-                if not (100 <= code_int <= 99999 and code[0] != '0'):
-                    return
-            elif code_length == 7:
-                if not (1000000 <= code_int <= 9999999):
-                    return
-            else:
+            if code_length == 5 and not (100 <= code_int <= 99999 and code[0] != '0'):
+                return
+
+            if code_length == 7 and not (1000000 <= code_int <= 9999999):
                 return
         elif not re.fullmatch(r'(?:[A-Z]\d{4}|\d{4}[A-Z]{1,5})', code, re.I):
             return
@@ -239,6 +319,7 @@ def extract_cpt_codes(text):
             'modifier': modifier.upper(),
             'is_numeric': is_numeric,
             'line': line_idx + 1,
+            'line_idx': line_idx,
             'line_text': line.strip()[:100],
             'has_date_current': date,
             'has_money_current': money,
@@ -248,7 +329,8 @@ def extract_cpt_codes(text):
             'has_service_indicator': service,
             'source': source,
             'evidence_score': score,
-            'evidence': evidence or []
+            'evidence': evidence or [],
+            'record_anchor': f"line:{line_idx}"
         })
 
     # ============================================================
@@ -262,42 +344,66 @@ def extract_cpt_codes(text):
         has_money_prev = line_idx > 0 and bool(money_pattern.search(lines[line_idx - 1]))
         has_date_next = line_idx < len(lines) - 1 and bool(date_pattern.search(lines[line_idx + 1]))
         has_money_next = line_idx < len(lines) - 1 and bool(money_pattern.search(lines[line_idx + 1]))
-
-        has_cpt_context = bool(context_pattern.search(line))          # weak - scoring only
-        has_strong_context = bool(STRONG_CPT_CONTEXT.search(line))     # strong - can unlock guard
+        has_strong_context = bool(STRONG_CPT_CONTEXT.search(line))
+        has_weak_context = bool(context_pattern.search(line))
         has_service_indicator = bool(re.search(r'SVCS|SERVICE|CODE|PROC|CPT|HCPCS', line, re.I))
 
-        # Negative-context guard: never treat a number as a CPT code if it's
-        # immediately labeled as some other kind of ID (ZIP, account, member,
-        # group, NPI, tax ID, phone, SSN, policy/claim/reference/invoice #, PO Box)
-        # -- unless the line ALSO has an unambiguous CPT/HCPCS/Procedure-Code label.
         if non_cpt_pattern.search(line) and not has_strong_context:
             continue
 
-        # Rule: Must have date AND money on the SAME line, OR explicit CPT context
-        if has_cpt_context or (has_date_current and has_money_current):
-            source = "cpt_context" if has_cpt_context else "date_money_adjacent"
+        matches = list(code_pattern.finditer(line))
+        if not matches:
+            continue
 
-            for match in code_pattern.finditer(line):
+        for match in matches:
+            if is_lookalike_candidate(match, line_idx, lines):
+                continue
 
-                # Reject ZIP codes, street addresses, and other ID lookalikes,
-                # unless the line has an unambiguous CPT/HCPCS/Procedure-Code label
-                # (a real CPT label essentially never coincides with a full
-                # postal address on the same line, so we still check even then —
-                # but this ordering means a false reject here only matters in
-                # that vanishingly rare overlap case).
-                if not has_strong_context and is_lookalike_candidate(match, line_idx, lines):
-                    continue
+            if not is_numeric_candidate_valid(
+                match, line, line_idx, lines,
+                matches, has_date_current, has_money_current):
+                continue
 
-                add_candidate(
-                    match, line_idx, line, source,
-                    date=has_date_current,
-                    money=has_money_current,
-                    date_adj=has_date_prev or has_date_next,
-                    money_adj=has_money_prev or has_money_next,
-                    context=has_cpt_context,
-                    service=has_service_indicator
-                )
+            procedure_structure = has_procedure_structure(match, line)
+
+            if not (has_strong_context or procedure_structure or match.group(2)):
+                continue
+
+            evidence = []
+            score = 0
+
+            if has_strong_context:
+                score += 50
+                evidence.append("strong_procedure_context")
+
+            if procedure_structure:
+                score += 40
+                evidence.append("procedure_structure")
+
+            if match.group(2):
+                score += 15
+                evidence.append("modifier")
+
+            if has_date_current:
+                score += 10
+                evidence.append("date")
+
+            if has_money_current:
+                score += 10
+                evidence.append("money")
+
+            add_candidate(
+                match, line_idx, line,
+                "cpt_context" if has_strong_context else "procedure_structure",
+                date=has_date_current,
+                money=has_money_current,
+                date_adj=has_date_prev or has_date_next,
+                money_adj=has_money_prev or has_money_next,
+                context=has_weak_context,
+                service=has_service_indicator,
+                score=score,
+                evidence=evidence
+            )
 
     # ============================================================
     # APPROACH 2
@@ -326,19 +432,19 @@ def extract_cpt_codes(text):
         #
         # All belong to ONE record.
         for date_idx in date_line_indexes:
-            block_lines = lines[date_idx:min(len(lines), date_idx + 7)]
+            block_end = min(len(lines), date_idx + 7)
+            block_lines = lines[date_idx:block_end]
             block_text = "\n".join(block_lines)
 
             # Evidence within logical record
             has_date = bool(date_pattern.search(block_text))
             has_money = bool(money_pattern.search(block_text))
             has_service_context = bool(re.search(
-                r'\b(?:service|medical|behavioral|treatment|autism|procedure|'
-                r'procedure\s*code|place|home|office|hospital|hcpcs|cpt)\b',
+                r'\b(?:service|medical|behavioral|treatment|autism|procedure|procedure\s*code|place|home|office|hospital|hcpcs|cpt|therapy|visit|surgery|diagnosis)\b',
                 block_text, re.I
             ))
 
-            if not (has_date and has_money):
+            if not (date_pattern.search(block_text) and money_pattern.search(block_text)):
                 continue
 
             # Find possible CPTs in the block
@@ -349,53 +455,51 @@ def extract_cpt_codes(text):
                 if STREET_LINE_PATTERN.match(block_line):
                     continue
 
-                for match in code_pattern.finditer(block_line):
-                    # Reject obvious IDs / ZIP / address lookalikes using the
-                    # SAME shared logic as Approach 1 (previously this only
-                    # checked a bare label regex and missed address-shaped lines).
-                    if non_cpt_pattern.search(block_line):
-                        continue
+                matches = list(code_pattern.finditer(block_line))
+                for match in matches:
                     if is_lookalike_candidate(match, abs_line_idx, lines):
                         continue
 
-                    code = match.group(1)
-                    modifier = match.group(0)[len(code):]
+                    if non_cpt_pattern.search(block_line):
+                        continue
 
-                    # Candidate-specific evidence
+                    code = match.group(1)
+                    modifier = match.group(2) or ''
+                    procedure_structure = has_procedure_structure(match, block_line)
+
+                    if code.isdigit() and not (procedure_structure or modifier or has_service_context):
+                        continue
+
                     evidence = ["date_in_record", "money_in_record"]
                     evidence_score = 60
 
                     if has_service_context:
                         evidence_score += 20
                         evidence.append("service_context")
+
+                    if procedure_structure:
+                        evidence_score += 25
+                        evidence.append("procedure_structure")
+
                     if modifier:
                         evidence_score += 10
                         evidence.append("modifier")
+
                     if relative_idx == 1:
-                        evidence_score += 20
+                        evidence_score += 15
                         evidence.append("immediately_after_date")
 
-                    # Strong fallback validation:
-                    # date + money + service context
-                    # OR date + money + modifier + immediately-after-date
-                    is_valid_fallback = (
-                        has_service_context or
-                        (modifier and relative_idx == 1)
+                    add_candidate(
+                        match, abs_line_idx, block_line,
+                        "logical_table_record",
+                        date_adj=True,
+                        money_adj=True,
+                        context=bool(context_pattern.search(block_text)),
+                        service=has_service_context,
+                        score=evidence_score,
+                        evidence=evidence
                     )
 
-                    if is_valid_fallback:
-                        add_candidate(
-                            match, abs_line_idx, block_line,
-                            "logical_table_record",
-                            date_adj=True,
-                            money_adj=True,
-                            context=bool(context_pattern.search(block_text)),
-                            service=has_service_context,
-                            score=evidence_score,
-                            evidence=evidence
-                        )
-
-        # Remove duplicates
         unique_fallback = {}
         for candidate in cpt_candidates:
             key = (candidate['code'], candidate.get('modifier', ''))
@@ -408,9 +512,6 @@ def extract_cpt_codes(text):
 
         cpt_candidates = list(unique_fallback.values())
 
-        if cpt_candidates:
-            print("CPT: Logical table-record detection found:",
-                  [f"{c['code']}{c.get('modifier', '')}" for c in cpt_candidates])
 
     # ============================================================
     # BUILD UNIQUE CODES
@@ -437,27 +538,38 @@ def extract_cpt_codes(text):
                 'evidence_score': candidate.get('evidence_score', 0),
                 'evidence': candidate.get('evidence', [])
             }
-        elif candidate['line'] not in code_details[code]['lines']:
-            code_details[code]['lines'].append(candidate['line'])
+        else:
+            if candidate['line'] not in code_details[code]['lines']:
+                code_details[code]['lines'].append(candidate['line'])
+
+            code_details[code]['has_cpt_context'] |= candidate.get('has_cpt_context', False)
+            code_details[code]['has_service_indicator'] |= candidate.get('has_service_indicator', False)
+
+            if candidate.get('evidence_score', 0) > code_details[code].get('evidence_score', 0):
+                code_details[code]['evidence_score'] = candidate.get('evidence_score', 0)
+                code_details[code]['evidence'] = candidate.get('evidence', [])
 
     unique_codes = list(code_details)
 
     # ============================================================
     # COUNT OCCURRENCES
     # ============================================================
-    code_counts = {}
+    code_counts = {code: 0 for code in code_details}
+    service_lines = {}
+    for candidate in cpt_candidates:
+        line_idx = candidate['line'] - 1
+        service_lines.setdefault(line_idx, set()).add(candidate['code'])
 
-    for code, details in code_details.items():
-        modifier = details.get('modifier', '')
-        full_code = code + modifier
+    for line_idx, codes in service_lines.items():
+        if not codes:
+            continue
+        # Count the service line only once, even when it has 2 CPTs.
+        primary_code = next(iter(codes))
+        if primary_code in code_counts:
+            code_counts[primary_code] += 1
 
-        count = 0
-        for line in lines:
-            for match in code_pattern.finditer(line):
-                if match.group(0).upper() == full_code.upper():
-                    count += 1
-
-        code_counts[code] = count
+    cpt_total_occurrences = sum(code_counts.values())
+    # print("CPT records : ",cpt_total_occurrences)
 
     # ============================================================
     # CALCULATE CONFIDENCE
@@ -467,13 +579,14 @@ def extract_cpt_codes(text):
     if unique_codes:
         confidence = min(1.0, 0.3 + len(unique_codes) * 0.15)
 
-        if any(d['has_cpt_context'] for d in code_details.values()):
+        if any(d.get('has_cpt_context', False) for d in code_details.values()):
             confidence = min(1.0, confidence + 0.2)
-        if any(d['modifier'] for d in code_details.values()):
+        if any(d.get('modifier', '') for d in code_details.values()):
             confidence = min(1.0, confidence + 0.1)
-        if all(d['is_numeric'] for d in code_details.values()):
-            confidence = min(1.0, confidence + 0.1)
-        if any(d['source'] == 'logical_table_record' for d in code_details.values()):
+        if any(
+            d.get('source') == 'logical_table_record'
+            for d in code_details.values()
+        ):
             confidence = min(1.0, confidence + 0.2)
 
     # ============================================================
@@ -488,21 +601,23 @@ def extract_cpt_codes(text):
         "line_details": [
             {
                 "code": code,
-                "code_length": d['code_length'],
-                "modifier": d['modifier'],
-                "is_numeric": d['is_numeric'],
-                "lines": d['lines'],
-                "sample_line": d['line_text'][:60] + ("..." if len(d['line_text']) > 60 else ""),
-                "has_date_current": d['has_date_current'],
-                "has_money_current": d['has_money_current'],
-                "has_date_adjacent": d['has_date_adjacent'],
-                "has_money_adjacent": d['has_money_adjacent'],
-                "has_cpt_context": d['has_cpt_context'],
-                "has_service_indicator": d['has_service_indicator'],
-                "source": d['source'],
-                "evidence_score": d['evidence_score'],
-                "evidence": d['evidence']
+                "code_length": details.get('code_length', len(code)),
+                "modifier": details.get('modifier', ''),
+                "is_numeric": details.get('is_numeric', True),
+                "lines": details['lines'],
+                "sample_line": details['line_text'][:60] + (
+                    "..." if len(details['line_text']) > 60 else ""
+                ),
+                "has_date_current": details.get('has_date_current', False),
+                "has_money_current": details.get('has_money_current', False),
+                "has_date_adjacent": details.get('has_date_adjacent', False),
+                "has_money_adjacent": details.get('has_money_adjacent', False),
+                "has_cpt_context": details.get('has_cpt_context', False),
+                "has_service_indicator": details.get('has_service_indicator', False),
+                "source": details.get('source', 'unknown'),
+                "evidence_score": details.get('evidence_score', 0),
+                "evidence": details.get('evidence', [])
             }
-            for code, d in code_details.items()
+            for code, details in code_details.items()
         ]
     }
