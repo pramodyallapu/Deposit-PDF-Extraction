@@ -11,6 +11,7 @@ import difflib
 from collections import defaultdict
 
 from .field_extraction import extract_field
+from .zone_extraction import extract_field_by_zone 
 from .cpt_extraction import extract_cpt_codes
 from .patterns import NAME_BOILERPLATE_BLOCKLIST, US_ADDRESS_LINE, LABEL_FRAGMENT_WORDS
 from .payers import KNOWN_PAYERS
@@ -310,10 +311,29 @@ def detect_payor_and_practice_from_first_page(pages, header_page_count=1):
 
 
 def get_header_page_range(total_pages):
-    if total_pages > 4:
-        return min(3, total_pages)
-    return min(2, total_pages)
+    if total_pages >= 4:
+        return min(2, total_pages)
+    return min(1, total_pages)
 
+def get_candidate_pages(pages, header_page_count):
+    """
+    check_number/check_date/check_amount mostly live on page 1, 2, or the
+    LAST page (the check stub / remittance summary is often appended at the
+    end of a multi-page EOB). pages[:header_page_count] alone silently drops
+    that last page -- this returns header pages UNION the last page.
+    """
+    total = len(pages)
+    if total == 0:
+        return []
+    count = min(header_page_count, total)
+    idx = set(range(count))
+    # For longer PDFs, include the last 3 pages unconditionally.
+    if total > 4:
+        idx.update(range(max(0, total - 3), total))
+    else:
+        # For 4 pages or fewer, include the last page.
+        idx.add(total - 1)
+    return [pages[i] for i in sorted(idx)]
 
 def extract_eob_data_from_pages(pages):
     """
@@ -326,6 +346,7 @@ def extract_eob_data_from_pages(pages):
     total_pages = len(pages)
     header_page_count = get_header_page_range(total_pages)
     header_pages = pages[:header_page_count]
+    candidate_pages = get_candidate_pages(pages, header_page_count)   # NEW: includes last page
 
     header_text = "\n\n".join(p["text"] for p in header_pages)
     full_text = "\n\n".join(p["text"] for p in pages)
@@ -335,7 +356,7 @@ def extract_eob_data_from_pages(pages):
     payor_practice_result = detect_payor_and_practice_from_first_page(pages, header_page_count)
 
     for field in ["check_number", "check_date", "check_amount"]:
-        result[field] = extract_field(header_text, field)
+        result[field] = extract_field_by_zone(candidate_pages, field)
 
     if payor_practice_result.get("insurance_name", {}).get("value"):
         result["insurance_name"] = {
@@ -368,6 +389,7 @@ def extract_eob_data_from_pages(pages):
     result["_meta"] = {
         "total_pages": total_pages,
         "header_pages_searched": header_page_count,
+        "candidate_page_numbers": [p["page_number"] for p in candidate_pages],
         "payor_practice_detection": payor_practice_result
     }
 

@@ -20,6 +20,7 @@ class CPTResult(BaseModel):
 class ExtractionMeta(BaseModel):
     total_pages: int
     header_pages_searched: int
+    candidate_searched: list[int]
 
 
 class ExtractionResponse(BaseModel):

@@ -40,14 +40,18 @@ def alias_regex(alias: str):
     combined_pattern = f"(?:{pattern}|{pattern_without_spaces})"
     return re.compile(r"(?<![A-Za-z0-9])" + combined_pattern + r"(?![A-Za-z0-9])", re.IGNORECASE)
 
-def find_aliases(lines, field_name):
+def find_aliases(lines, field_name, aliases=None):
+    if aliases is None:
+        aliases = FIELD_ALIASES[field_name]          # unchanged default behavior
     matches = []
     for line_no, line in enumerate(lines):
-        for alias, weight in FIELD_ALIASES[field_name]:
+        for alias, weight in aliases:
             pattern = alias_regex(alias)
-            if not pattern: continue
+            if not pattern:
+                continue
             for match in pattern.finditer(line):
-                matches.append({"line": line_no, "start": match.start(), "end": match.end(), "alias": alias, "weight": weight, "matched_text": match.group(0)})
+                matches.append({"line": line_no, "start": match.start(), "end": match.end(),
+                                 "alias": alias, "weight": weight, "matched_text": match.group(0)})
     unique_matches = []
     seen = set()
     for match in matches:
@@ -137,9 +141,11 @@ def parse_amount(value: str):
 
 def validate_amount(value: str):
     if not isinstance(value, str): return False
+    if '.' not in value:
+        return False
     amount = parse_amount(value)
     if amount is None or amount < 0 or amount > 10_000_000: return False
-    if '.' in value and len(value.split('.')[-1]) != 2: return False
+    if len(value.split('.')[-1]) != 2: return False
     return True
 
 def validate_check_number(value: str):
@@ -184,16 +190,16 @@ def validate_insurance_name(value: str):
 def context_score(field_name, text):
     score = 0.0
     if field_name == "check_number":
-        if CHECK_NUMBER_HINTS.search(text): score += 0.25
-        if re.search(r'\b(?:#|no|number)\b', text, re.IGNORECASE): score += 0.10
+        if CHECK_NUMBER_HINTS.search(text): score += 0.10
+        if re.search(r'\b(?:#|no|number|draft)\b', text, re.IGNORECASE): score += 0.25
     elif field_name == "check_date":
         if DATE_HINTS.search(text): score += 0.25
         # Use enhanced date pattern to detect any date-like string
         if DATE_PATTERN_ENHANCED.search(text):
             score += 0.15
     elif field_name == "check_amount":
-        if AMOUNT_HINTS.search(text): score += 0.25
-        if re.search(r'[\$]', text): score += 0.10
+        if AMOUNT_HINTS.search(text): score += 0.10
+        if re.search(r'[\$]', text): score += 0.25
     elif field_name == "practice_name":
         if PRACTICE_HINTS.search(text): score += 0.25
         if re.search(r'\b(?:LLC|PLLC|PC|PA|Inc|Corp)\b', text, re.IGNORECASE): score += 0.10
@@ -206,7 +212,7 @@ def context_score(field_name, text):
     return score
 
 # 11. DIRECTION SCORE (unchanged)
-DIRECTION_SCORES = {"right": 1.00, "left": 0.75, "below": 0.85, "above": 0.80}
+DIRECTION_SCORES = {"right": 1.00, "left": 0.65, "below": 0.85, "above": 0.60}
 
 # 12. CANDIDATE SCORING (unchanged)
 def score_candidate(field_name, value, alias_weight, direction, distance, source_text, line_number, alias_line_number):

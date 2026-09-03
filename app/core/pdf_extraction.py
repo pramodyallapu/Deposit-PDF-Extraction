@@ -1,5 +1,5 @@
 import pdfplumber
-import fitz                 # PyMuPDF
+import pymupdf                 # PyMuPDF
 import PyPDF2
 import pytesseract
 import re
@@ -30,7 +30,7 @@ def _try_pdfplumber_page(pdf, page_number):
 
 def _try_pymupdf_page(doc, page_number):
     page = doc[page_number - 1]
-    return page.get_text() or ""
+    return page.get_text("text", sort=True)or ""
 
 
 def _try_pypdf2_page(reader, page_number):
@@ -45,7 +45,7 @@ def _try_ocr_page(pdf_path, page_number):
 
 # ---------- Build corrected PDF in memory ----------
 def build_corrected_pdf(pdf_path, min_rotation_conf=1.0, dpi=150):
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
     rotations_to_apply = {}
     total_pages = len(doc)
 
@@ -59,7 +59,7 @@ def build_corrected_pdf(pdf_path, min_rotation_conf=1.0, dpi=150):
         return None
 
     print(f"Building in‑memory corrected PDF with {len(rotations_to_apply)} rotated pages...")
-    new_doc = fitz.open()
+    new_doc = pymupdf.open()
 
     for page_num in range(1, total_pages + 1):
         original_page = doc[page_num - 1]
@@ -94,47 +94,59 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
         pypdf2_source = io.BytesIO(pdf_data)
     else:
         print("No rotation needed – using original PDF.")
-        pdfplumber_source = pdf_path
-        fitz_source = pdf_path
-        pypdf2_source = pdf_path
+        with open(pdf_path, "rb") as f:
+            pdf_data = f.read()
+
+    # Give each library its own independent stream
+    pdfplumber_source = io.BytesIO(pdf_data)
+    fitz_source = io.BytesIO(pdf_data)
+    pypdf2_source = io.BytesIO(pdf_data)
 
     pages = []
     methods_used = []
 
-    # Open pdfplumber
-    with pdfplumber.open(pdfplumber_source) as plumber_pdf:
-        # Open PyMuPDF (fitz) – handle both BytesIO and file path
-        if isinstance(fitz_source, io.BytesIO):
-            mupdf_doc = fitz.open(stream=fitz_source, filetype="pdf")
-        else:
-            mupdf_doc = fitz.open(fitz_source)
+    try:
+        # Open all PDF engines from independent in-memory streams
+        with pdfplumber.open(pdfplumber_source) as plumber_pdf:
+            mupdf_doc = pymupdf.open(
+                stream=fitz_source,
+                filetype="pdf"
+            )
 
-        # Open PyPDF2 – handle both BytesIO and file path
-        if isinstance(pypdf2_source, io.BytesIO):
-            pypdf2_reader = PyPDF2.PdfReader(pypdf2_source)
-        else:
-            with open(pypdf2_source, "rb") as f:
-                pypdf2_reader = PyPDF2.PdfReader(f)
+            pypdf2_reader = PyPDF2.PdfReader(
+                pypdf2_source
+            )
 
-        page_count = len(plumber_pdf.pages)
+            plumber_count = len(plumber_pdf.pages)
+            mupdf_count = len(mupdf_doc)
+            pypdf2_count = len(pypdf2_reader.pages)
+
+            print("pdfplumber pages:", plumber_count)
+            print("PyMuPDF pages:", mupdf_count)
+            print("PyPDF2 pages:", pypdf2_count)
+
+            # Use the largest page count available
+            page_count = max( plumber_count, mupdf_count, pypdf2_count)
+
+            print("Total pages to process:", page_count)
         for page_number in range(1, page_count + 1):
             text = ""
             method = None
-            # ----- 1. Try pdfplumber -----
+            # ----- 1. Try PyMuPDF -----
             try:
-                text = _try_pdfplumber_page(plumber_pdf, page_number)
+                text = _try_pymupdf_page(mupdf_doc, page_number)
                 if text.strip() and len(text.strip()) >= min_chars:
-                    method = "pdfplumber"
+                    method = "PyMuPDF"
             except Exception as e:
-                print(f"Page {page_number}: pdfplumber failed: {e}")
-            # ----- 2. Try PyMuPDF -----
+                print(f"Page {page_number}: PyMuPDF failed: {e}")
+            # ----- 2. Try pdfplumber -----
             if not method:
                 try:
-                    text = _try_pymupdf_page(mupdf_doc, page_number)
+                    text = _try_pdfplumber_page(plumber_pdf, page_number)
                     if text.strip() and len(text.strip()) >= min_chars:
-                        method = "PyMuPDF"
+                        method = "pdfplumber"
                 except Exception as e:
-                    print(f"Page {page_number}: PyMuPDF failed: {e}")
+                    print(f"Page {page_number}: pdfplumber failed: {e}")
             # ----- 3. Try PyPDF2 -----
             if not method:
                 try:
@@ -160,5 +172,13 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
         # Close PyMuPDF if it was opened from BytesIO
         if isinstance(fitz_source, io.BytesIO):
             mupdf_doc.close()
-    print(f"Method breakdown: { {m: methods_used.count(m) for m in set(methods_used)} }")
+    finally:
+        # Explicitly close all streams
+        pdfplumber_source.close()
+        fitz_source.close()
+        pypdf2_source.close()
+    # Extraction method summary
+    breakdown = { method: methods_used.count(method) for method in set(methods_used)}
+
+    print(f"Method breakdown: {breakdown}")
     return pages

@@ -5,25 +5,31 @@ from .scoring import *  # noqa: F401,F403
 # 14. FIELD CANDIDATE ENGINE
 
 
-def find_field_candidates(text, field_name):
+def find_field_candidates(text, field_name, aliases=None):
     text = normalize_text(text)
     lines = text.splitlines()
     candidates = []
-    aliases = find_aliases(lines, field_name)
-    for alias_match in aliases:
+    aliases_matches = find_aliases(lines, field_name, aliases=aliases)   # <- pass through
+    for alias_match in aliases_matches:
         alias_line = alias_match["line"]
         nearby = get_nearby_lines(lines, alias_line, alias_match["start"], alias_match["end"])
         for area in nearby:
             source_text = area["text"]
-            if not source_text.strip(): continue
+            if not source_text.strip():
+                continue
             matches = extract_values_from_text(source_text, field_name)
             for value_match in matches:
                 value = value_match.group(1).strip()
-                if field_name == "check_number": value = clean_check_number_candidate(value)
-                elif field_name == "cpt_code": value = clean_cpt_candidate(value)
-                if area["direction"] == "right": distance = value_match.start()
-                elif area["direction"] == "left": distance = len(source_text) - value_match.end()
-                else: distance = area["distance"]
+                if field_name == "check_number":
+                    value = clean_check_number_candidate(value)
+                elif field_name == "cpt_code":
+                    value = clean_cpt_candidate(value)
+                if area["direction"] == "right":
+                    distance = value_match.start()
+                elif area["direction"] == "left":
+                    distance = len(source_text) - value_match.end()
+                else:
+                    distance = area["distance"]
                 score = score_candidate(
                     field_name=field_name, value=value, alias_weight=alias_match["weight"],
                     direction=area["direction"], distance=distance,
