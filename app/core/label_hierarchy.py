@@ -22,6 +22,7 @@ FIELD_LABEL_HIERARCHY = {
             ("Check EFT No", 1.00),
             ("EFT#", 0.80),
             ("Trace Number", 0.60),
+            ("Check/EFT Trace Number", 0.80)
         ],
         "level_2": [
             # Strong secondary options
@@ -108,7 +109,9 @@ FIELD_LABEL_HIERARCHY = {
             ("PAYDOLLARSCENTS", 0.80),
             ("PAY DOLLARS CENTS", 0.80),
             ("Card Value", 0.40),
-            ("Trace Amount", 0.60)
+            ("Trace Amount", 0.60),
+            ("Payment Amount", 0.60),
+            ("Claim Payment", 0.30),
         ],
         "level_2": [
             # Strong secondary

@@ -79,7 +79,7 @@ PO_BOX_PATTERN = re.compile(r'\bP\.?O\.?\s*Box\b', re.I)
 
 # Only these unambiguously mean "this number is a procedure code" and may
 # override the non-CPT-label guard below.
-STRONG_CPT_CONTEXT = re.compile(r'\bCPT\b|\bHCPCS\b|\bProc(?:edure)?\s*Code\b', re.I)
+STRONG_CPT_CONTEXT = re.compile(r'\b(?:CPT|HCPCS|HC|PROC(?:EDURE)?\s*CODE)\b\s*[:#-]?', re.I)
 
 # Broad/ambiguous context, used only for confidence scoring - never to unlock a line.
 context_pattern = re.compile(r'CPT|Procedure|Proc|HCPCS|Code|Service|SVCS', re.I)
@@ -180,7 +180,7 @@ def is_lookalike_candidate(match, line_idx, lines):
 
     return False
 
-def has_procedure_structure(match, line):
+def has_procedure_structure(match, line, lines=None, line_idx=None):
     before = line[:match.start()]
     after = line[match.end():]
     modifier = match.group(2) or ''
@@ -196,10 +196,20 @@ def has_procedure_structure(match, line):
 
     if re.match(r'\s*/\s*(?:[A-Za-z0-9]{1,5})\s*(?:/|\b)', after):
         return True
+    if modifier:
+        return True
 
-    return bool(modifier)
+    # Handle split procedure structures such as:
+    # HC:92507 / $80.00 ...
+    # XP,GN / 1 PR-3 $15.00
+    if lines is not None and line_idx is not None and line_idx < len(lines) - 1:
+        next_line = lines[line_idx + 1].strip()
+        if re.search(r'^\s*[A-Za-z0-9]{1,5}(?:\s*,\s*[A-Za-z0-9]{1,5})?\s*/\s*\d+(?:\.\d+)?\b', next_line, re.I):
+            if re.search(r'(?:HC|CPT|HCPCS|PROC(?:EDURE)?|CODE)\s*[:#-]?\s*', before, re.I):
+                return True
+    return False
 
-def has_nearby_procedure_marker(match, line):
+def has_nearby_procedure_marker(match, line, lines=None, line_idx=None):
     before = line[:match.start()]
     after = line[match.end():]
 
@@ -210,7 +220,13 @@ def has_nearby_procedure_marker(match, line):
         return True
 
     nearby = line[max(0, match.start() - 12):match.start() + 2]
-    return bool(re.search(r'\b(?:HC|CPT|PROC|PROCEDURE)\s*[:#-]?', nearby, re.I))
+    if re.search(r'\b(?:HC|CPT|PROC|PROCEDURE)\s*[:#-]?', nearby, re.I):
+        return True
+    if lines is not None and line_idx is not None and line_idx < len(lines) - 1:
+        next_line = lines[line_idx + 1].strip()
+        if re.search(r'^\s*[A-Za-z0-9]{1,5}(?:\s*,\s*[A-Za-z0-9]{1,5})?\s*/\s*\d+(?:\.\d+)?\b', next_line, re.I):
+            return True
+    return False
 
 def is_numeric_candidate_valid(match, line, line_idx, lines, all_matches, has_date, has_money):
     code = match.group(1)
@@ -222,7 +238,7 @@ def is_numeric_candidate_valid(match, line, line_idx, lines, all_matches, has_da
     if is_lookalike_candidate(match, line_idx, lines):
         return False
 
-    if has_procedure_structure(match, line):
+    if has_procedure_structure(match, line, lines, line_idx):
         return True
 
     if modifier:
@@ -364,7 +380,7 @@ def extract_cpt_codes(text):
                 matches, has_date_current, has_money_current):
                 continue
 
-            procedure_structure = has_procedure_structure(match, line)
+            procedure_structure = has_procedure_structure(match, line, lines, line_idx)
 
             if not (has_strong_context or procedure_structure or match.group(2)):
                 continue
@@ -465,7 +481,7 @@ def extract_cpt_codes(text):
 
                     code = match.group(1)
                     modifier = match.group(2) or ''
-                    procedure_structure = has_procedure_structure(match, block_line)
+                    procedure_structure = has_procedure_structure(match, block_line, lines, abs_line_idx)
 
                     if code.isdigit() and not (procedure_structure or modifier or has_service_context):
                         continue
