@@ -2,9 +2,11 @@ import pdfplumber
 import pymupdf                 # PyMuPDF
 import PyPDF2
 import pytesseract
-import re
 import io
+import math
+import re
 from pdf2image import convert_from_path
+from PIL import Image
 
 # ---------- Rotation detection (unchanged) ----------
 def detect_page_rotation(pdf_path, page_number, dpi=150):
@@ -76,6 +78,26 @@ def _words_to_text(words, y_tolerance=4):
 # ---------- PyMuPDF extraction ----------
 def _try_pymupdf_page(doc, page_number, rotation=0):
     page = doc[page_number - 1]
+    native_rotation = page.rotation
+
+    if rotation and native_rotation != 0:
+        print(f"Page {page_number}: skipping manual transform — "
+              f"native page.rotation={native_rotation} already applied by PyMuPDF "
+              f"(OSD suggested {rotation}, ignored to avoid double-transform)")
+        rotation = 0
+
+    if native_rotation != 0:
+        # PDF has its own /Rotate. Coordinates from get_text("words") are
+        # already in rotation-corrected space (confirmed via page.rect),
+        # so use MuPDF's own reading-order reconstruction instead of the
+        # custom y-tolerance clustering, which collapses adjacent table
+        # rows on dense/tabular landscape pages.
+        text = page.get_text("text", sort=True)
+        if text.strip():
+            return text
+
+    # No native rotation — either upright, or an OSD-only rotation that
+    # still needs manual coordinate transform via _transform_word.
     words = page.get_text("words", sort=False)
     if not words:
         return ""
@@ -95,6 +117,34 @@ def _try_pypdf2_page(reader, page_number):
     page = reader.pages[page_number - 1]
     return page.extract_text() or ""
 
+
+def _detect_text_rotation(page):
+    """Return the correction angle for a page whose text layer is sideways."""
+    orientation_chars = {0: 0, 90: 0, 180: 0, 270: 0}
+    blocks = page.get_text("dict").get("blocks", [])
+    for block in blocks:
+        for line in block.get("lines", []):
+            text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+            if not text:
+                continue
+            direction = line.get("dir", (1.0, 0.0))
+            direction_angle = math.degrees(math.atan2(direction[1], direction[0])) % 360
+            nearest_angle = round(direction_angle / 90) * 90 % 360
+            angle_difference = abs((direction_angle - nearest_angle + 180) % 360 - 180)
+            if angle_difference <= 15:
+                correction = (-nearest_angle) % 360
+                orientation_chars[correction] += len(text)
+
+    total_chars = sum(orientation_chars.values())
+    if total_chars < 20:
+        return 0
+
+    correction, char_count = max(orientation_chars.items(), key=lambda item: item[1])
+    if correction and char_count / total_chars >= 0.7:
+        return correction
+    return 0
+
+
 # ---------- OCR fallback ----------
 def _try_ocr_page(pdf_path, page_number, rotation=0):
     images = convert_from_path(pdf_path, dpi=300, first_page=page_number, last_page=page_number)
@@ -103,7 +153,57 @@ def _try_ocr_page(pdf_path, page_number, rotation=0):
     image = images[0]
     if rotation:
         image = image.rotate(-rotation, expand=True)
-    return pytesseract.image_to_string(image)
+    for config in ("", "--psm 6", "--psm 11"):
+        text = pytesseract.image_to_string(image, config=config)
+        if text.strip():
+            return text
+    return ""
+
+
+def _try_ocr_image_regions(page, existing_text):
+    """OCR embedded image regions on the first page, such as payer logos."""
+    existing_normalized = re.sub(r"\W+", "", existing_text).casefold()
+    recognized_lines = []
+    recognized_normalized = set()
+
+    for image_info in page.get_images(full=True):
+        xref = image_info[0]
+        try:
+            image_rects = page.get_image_rects(xref)
+        except Exception as e:
+            print(f"First-page image {xref}: could not locate image regions: {e}")
+            continue
+
+        for image_rect in image_rects:
+            try:
+                pixmap = page.get_pixmap(
+                    matrix=pymupdf.Matrix(300 / 72, 300 / 72),
+                    clip=image_rect,
+                    alpha=False,
+                )
+                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+                image_text = ""
+                for config in ("", "--psm 6", "--psm 11"):
+                    image_text = pytesseract.image_to_string(image, config=config)
+                    if image_text.strip():
+                        break
+            except Exception as e:
+                print(f"First-page image {xref}: OCR failed: {e}")
+                continue
+
+            for line in image_text.splitlines():
+                normalized_line = re.sub(r"\W+", "", line).casefold()
+                if (
+                    not normalized_line
+                    or normalized_line in existing_normalized
+                    or normalized_line in recognized_normalized
+                ):
+                    continue
+                recognized_lines.append(line.strip())
+                recognized_normalized.add(normalized_line)
+
+    return "\n".join(recognized_lines)
+
 
 # ---------- Main extraction ----------
 def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=150):
@@ -112,14 +212,26 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
     rotation_confidences = {}
     temp_doc = pymupdf.open(pdf_path)
     total_pages = len(temp_doc)
-    temp_doc.close()
 
     for page_number in range(1, total_pages + 1):
-        angle, confidence = detect_page_rotation(pdf_path, page_number, dpi)
-        if angle is not None and confidence >= min_rotation_conf and angle != 0:
-            page_rotations[page_number] = angle % 360
-            rotation_confidences[page_number] = confidence
-            print(f"Page {page_number}: detected rotation {angle}° (confidence {confidence:.2f})")
+        try:
+            native_rotation = temp_doc[page_number - 1].rotation
+            if native_rotation != 0:
+                print(f"Page {page_number}: native /Rotate={native_rotation}, skipping OSD")
+                continue
+            text_rotation = _detect_text_rotation(temp_doc[page_number - 1])
+            if text_rotation:
+                page_rotations[page_number] = text_rotation
+                print(f"Page {page_number}: detected text-layer rotation {text_rotation}°")
+                continue
+            angle, confidence = detect_page_rotation(pdf_path, page_number, dpi)
+            if angle is not None and confidence >= min_rotation_conf and angle != 0:
+                page_rotations[page_number] = angle % 360
+                rotation_confidences[page_number] = confidence
+                print(f"Page {page_number}: detected rotation {angle}° (confidence {confidence:.2f})")
+        except Exception as e:
+            print(f"Page {page_number}: rotation detection failed: {e}")
+    temp_doc.close()
 
     if page_rotations:
         print(f"Detected rotations on {len(page_rotations)} page(s).")
@@ -147,9 +259,9 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
             mupdf_count = len(mupdf_doc)
             pypdf2_count = len(pypdf2_reader.pages)
 
-            print("pdfplumber pages:", plumber_count)
-            print("PyMuPDF pages:", mupdf_count)
-            print("PyPDF2 pages:", pypdf2_count)
+            # print("pdfplumber pages:", plumber_count)
+            # print("PyMuPDF pages:", mupdf_count)
+            # print("PyPDF2 pages:", pypdf2_count)
 
             # Use the largest page count available
             page_count = max( plumber_count, mupdf_count, pypdf2_count)
@@ -196,6 +308,16 @@ def extract_pages_from_pdf(pdf_path, min_chars=20, min_rotation_conf=1.0, dpi=15
                 if not method:
                     print(f"Page {page_number}: ALL methods failed.")
                     method = "none"
+                if page_number == 1:
+                    try:
+                        image_text = _try_ocr_image_regions(
+                            mupdf_doc[page_number - 1], text
+                        )
+                        if image_text:
+                            # print("IMAGE or LOGO : ", image_text)
+                            text = f"{text.rstrip()}\n\n{image_text}".strip()
+                    except Exception as e:
+                        print(f"Page {page_number}: image OCR failed: {e}")
                 pages.append({ "page_number": page_number, "text": text, "method": method, "rotation": rotation})
                 methods_used.append(method)
 

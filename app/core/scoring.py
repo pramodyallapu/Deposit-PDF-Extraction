@@ -4,6 +4,7 @@ from dataclasses import dataclass, field as dc_field
 from datetime import datetime
 
 from .patterns import *  # noqa: F401,F403 -- FIELD_ALIASES, FIELD_PATTERNS, *_HINTS, DATE_PATTERN_ENHANCED
+from .label_hierarchy import get_all_aliases_for_field
 
 
 # 4. CANDIDATE (unchanged)
@@ -17,6 +18,8 @@ class Candidate:
     distance: int
     source_line: str = ""
     context_score: float = 0.0
+    position: int=0
+    alias_position: int = 0
 
 # 5. NORMALIZATION (unchanged)
 def normalize_text(text: str) -> str:
@@ -42,7 +45,7 @@ def alias_regex(alias: str):
 
 def find_aliases(lines, field_name, aliases=None):
     if aliases is None:
-        aliases = FIELD_ALIASES[field_name]          # unchanged default behavior
+        aliases = get_all_aliases_for_field(field_name) or FIELD_ALIASES[field_name]
     matches = []
     for line_no, line in enumerate(lines):
         for alias, weight in aliases:
@@ -98,6 +101,15 @@ def validate_date(value: str):
             pass
 
     # Try 6-digit (MMDDYY) and 8-digit (MMDDYYYY)
+    spaced_numeric_match = re.fullmatch(r"(\d{1,2})\s+(\d{1,2})\s+(\d{2})", value)
+    if spaced_numeric_match:
+        try:
+            dt = datetime.strptime("".join(spaced_numeric_match.groups()), "%m%d%y")
+            if 1990 <= dt.year <= datetime.now().year + 1:
+                return True
+        except ValueError:
+            pass
+
     if re.match(r'^\d{6}$', value):
         try:
             dt = datetime.strptime(value, "%m%d%y")
@@ -151,13 +163,11 @@ def validate_amount(value: str):
 def validate_check_number(value: str):
     if not isinstance(value, str): return False
     value = value.strip()
-    if len(value) < 4 or len(value) > 25: return False
-    if not re.search(r"\d", value): return False
+    if len(value) < 9 or len(value) > 25: return False
+    if not re.fullmatch(r"[A-Za-z0-9]+(?:[-/][A-Za-z0-9]+)*", value): return False
+    if not any(c.isdigit() for c in value): return False
     bad_words = {"payment", "check", "number", "date", "amount", "provider", "payer", "insurance", "total", "paid", "service", "code", "cpt", "procedure"}
     if value.lower() in bad_words: return False
-    digits = sum(c.isdigit() for c in value)
-    letters = sum(c.isalpha() for c in value)
-    if letters > digits and digits < 3: return False
     return True
 
 def validate_cpt_code(value):
@@ -166,7 +176,10 @@ def validate_cpt_code(value):
         return any(validate_cpt_code(v) for v in value if v)
     if isinstance(value, str):
         try:
-            code = int(value.strip())
+            match = re.fullmatch(r"(\d{5})(?:[A-Za-z](?:[A-Za-z0-9]){0,4})?", value.strip())
+            if not match:
+                return False
+            code = int(match.group(1))
             return 100 <= code <= 99999
         except (ValueError, TypeError):
             return False
@@ -245,7 +258,7 @@ def clean_check_number_candidate(value):
 
 def clean_cpt_candidate(value):
     if not isinstance(value, str): return ""
-    match = re.search(r'\b(\d{5})\b', value.strip())
+    match = re.search(r'(?<![A-Za-z0-9])(\d{5})(?!\d)', value.strip())
     return match.group(1) if match else value
 
 def normalize_date_to_ddmmyyyy(value: str) -> str:
@@ -260,7 +273,7 @@ def normalize_date_to_ddmmyyyy(value: str) -> str:
  
     # Numeric with separators: MM/DD/YYYY, MM-DD-YYYY, MM.DD.YYYY, MM/DD/YY, and
     # already-dd/mm/yyyy style YYYY/MM/DD.
-    cleaned = value.replace("-", "/").replace(".", "/")
+    cleaned = value.replace("-", "/").replace(".", "/").replace(" ","/")
     for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d", "%d/%m/%Y"):
         try:
             dt = datetime.strptime(cleaned, fmt)
@@ -269,6 +282,16 @@ def normalize_date_to_ddmmyyyy(value: str) -> str:
         except ValueError:
             pass
  
+    # # Spaced numeric MM DD YY
+    # spaced_numeric_match = re.fullmatch(r"(\d{1,2})\s+(\d{1,2})\s+(\d{2})", value)
+    # if spaced_numeric_match:
+    #     try:
+    #         dt = datetime.strptime("".join(spaced_numeric_match.groups()), "%m%d%y")
+    #         if _in_range(dt):
+    #             return dt.strftime("%d/%m/%Y")
+    #     except ValueError:
+    #         pass
+
     # 6-digit MMDDYY / 8-digit MMDDYYYY (no separators)
     if re.match(r'^\d{6}$', value):
         try:

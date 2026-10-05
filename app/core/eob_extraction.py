@@ -6,15 +6,15 @@
     <= 4 total pages -> search pages 1-2 (capped at actual page count)
 - cpt_codes: searched across ALL pages (procedure lines can appear anywhere).
 """
+"""Document-level EOB field extraction with known payor/practice matching."""
 import re
-import difflib
 from collections import defaultdict
-
+from . import payers as payers_module
 from .field_extraction import extract_field
-from .zone_extraction import extract_field_by_zone 
+from .zone_extraction import extract_field_by_zone
 from .cpt_extraction import extract_cpt_codes
+from .scoring import validate_check_number
 from .patterns import NAME_BOILERPLATE_BLOCKLIST, US_ADDRESS_LINE, LABEL_FRAGMENT_WORDS
-from .payers import KNOWN_PAYERS
 
 
 def _is_boilerplate(value: str) -> bool:
@@ -26,363 +26,211 @@ def _is_boilerplate(value: str) -> bool:
     return bool(NAME_BOILERPLATE_BLOCKLIST.search(stripped))
 
 
-def matches_known_payer(text: str, min_ratio: float = 0.82):
-    text_norm = re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
-    for canonical, aliases in KNOWN_PAYERS.items():
-        for alias in aliases:
-            if alias in text_norm:
-                return True, canonical
-            ratio = difflib.SequenceMatcher(None, alias, text_norm).ratio()
-            if ratio >= min_ratio:
-                return True, canonical
-    return False, None
+ENTITY_MATCH_THRESHOLD = 0.80
 
 
-def get_insurance_candidates_from_first_page(pages, header_page_count=1, num_lines=20, top_n=10):
-    """
-    Scan the first `num_lines` lines of the header pages to find insurance name candidates.
-    Returns a list of dicts: [{"text": candidate, "score": score}, ...] sorted by score descending.
-    """
+def _entity_pages(pages, entity_matcher, known_name, aliases):
+    """Return the number of pages containing the same known entity."""
+    names = [known_name] + [x for x in aliases if x]
+    compact_names = [re.sub(r"[^a-z0-9]", "", x.lower()) for x in names]
+    present = 0
+    for page in pages:
+        text = page.get("text", "") or ""
+        compact = re.sub(r"[^a-z0-9]", "", text.lower())
+        if any(n and n in compact for n in compact_names):
+            present += 1
+    return present
+
+
+def _find_best_known_entity(pages, entity_type, header_page_count=1):
+    """Ordered known-entity extraction: page 1 -> match -> page consistency -> final value."""
     if not pages:
-        return []
+        return {"value": "", "confidence": 0.0, "source": "not_found"}
 
-    header_pages = pages[:max(1, header_page_count)]
-    combined_text = "\n\n".join(p["text"] for p in header_pages)
-    lines = [line.strip() for line in combined_text.split('\n') if line.strip()]
-    lines = lines[:num_lines]
+    header_page = pages[0]
+    lines = [line.strip() for line in (header_page.get("text", "") or "").splitlines() if line.strip()]
+    matcher = (payers_module.match_known_payer_text if entity_type == "payor"
+               else payers_module.match_known_practice_text)
+    records = (payers_module.get_all_payors() if entity_type == "payor"
+               else payers_module.get_all_practices())
 
     candidates = []
-
-    for line in lines:
+    for line_index, line in enumerate(lines):
         if len(line) < 3 or _is_boilerplate(line):
             continue
-        # Skip lines that look like addresses (contain ZIP)
-        if re.search(r'\b\d{5}(?:-\d{4})?\b', line):
+        if re.search(r"\b\d{5}(?:-\d{4})?\b", line):
             continue
-
-        score = 0.0
-        # 1. Known payer match (strongest)
-        is_known, _ = matches_known_payer(line)
-        if is_known:
-            score += 0.5
-        # 2. Insurance keywords
-        if re.search(r'(Insurance|Company|Corp|Inc|Care|Health|Services|Plan|Carrier)', line, re.I):
-            score += 0.15
-        # 3. All caps (often a name)
-        if line.isupper():
-            score += 0.1
-        # 4. Length boost
-        if len(line) > 15:
-            score += 0.1
-        # 5. Penalty for labels ending with colon
-        if re.match(r'^[A-Za-z\s]+:\s*$', line):
-            score -= 0.4
-
-        if score > 0:
-            candidates.append({"text": line, "score": score})
-
-    # Sort by score descending and return top N
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    return candidates[:top_n]
-
-
-def check_candidates_across_pages(candidates, pages, threshold=0.8):
-    """
-    For each candidate (line text), count on how many pages it appears.
-    Returns (best_candidate, confidence) if any candidate appears on >= threshold * total_pages pages,
-    else (None, 0.0).
-    """
-    if not candidates or not pages:
-        return None, 0.0
-
-    total_pages = len(pages)
-    # Normalize candidates: lower-case, stripped
-    normalized_candidates = {cand["text"].lower(): cand["text"] for cand in candidates}
-    candidate_lower_list = list(normalized_candidates.keys())
-
-    # For each page, collect the set of lines (lower-case) from the first 30 lines
-    page_line_sets = []
-    for page in pages:
-        text = page.get("text", "")
-        if not text:
+        matched, canonical, match_score, matched_text = matcher(line, ENTITY_MATCH_THRESHOLD)
+        if not matched or not canonical or match_score < ENTITY_MATCH_THRESHOLD:
             continue
-        lines = [line.strip().lower() for line in text.split('\n') if line.strip()]
-        lines = lines[:30]  # consider first 30 lines per page
-        # Filter out boilerplate and address lines
-        filtered = []
-        for line in lines:
-            if len(line) < 3 or _is_boilerplate(line):
-                continue
-            if re.search(r'\b\d{5}(?:-\d{4})?\b', line):
-                continue
-            filtered.append(line)
-        page_line_sets.append(set(filtered))
+        record = next((r for r in records if str(r.get("name", "")).strip().lower() == canonical.lower()), None)
+        if not record:
+            continue
+        aliases = record.get("aliases", []) or []
+        page_presence = _entity_pages(pages, matcher, canonical, aliases)
+        presence_ratio = page_presence / max(len(pages), 1)
+        # Page consistency increases the score without allowing an unknown name through.
+        final_score = min(1.0, match_score * 0.75 + presence_ratio * 0.25)
+        candidates.append({
+            "canonical": canonical,
+            "matched_text": matched_text or line,
+            "match_score": match_score,
+            "page_presence": page_presence,
+            "page_ratio": presence_ratio,
+            "score": final_score,
+            "line_number": line_index + 1,
+        })
 
-    if not page_line_sets:
-        return None, 0.0
+    if not candidates:
+        return {"value": "", "confidence": 0.0, "source": "not_found"}
 
-    # Count occurrences per candidate
-    candidate_counts = defaultdict(int)
-    for cand_lower in candidate_lower_list:
-        count = 0
-        for line_set in page_line_sets:
-            if cand_lower in line_set:
-                count += 1
-        candidate_counts[cand_lower] = count
+    # Prefer strongest match first, then consistency across pages.
+    candidates.sort(key=lambda x: (x["score"], x["page_ratio"], x["match_score"]), reverse=True)
+    best = candidates[0]
 
-    # Find best candidate
-    best_candidate_lower = None
-    best_count = 0
-    for cand_lower, count in candidate_counts.items():
-        if count > best_count:
-            best_count = count
-            best_candidate_lower = cand_lower
-
-    if best_candidate_lower is None:
-        return None, 0.0
-
-    ratio = best_count / total_pages
-    if ratio >= threshold:
-        # Get original case
-        original = normalized_candidates[best_candidate_lower]
-        confidence = 0.5 + ratio * 0.5  # ratio 0.8 -> 0.9, 1.0 -> 1.0
-        return original, confidence
-
-    return None, 0.0
-
-
-def extract_insurance_from_first_lines(pages, header_page_count=1, num_lines=20):
-    """
-    Scan the first `num_lines` lines of the header pages to find the best insurance name.
-    Returns (candidate, confidence) or (None, 0.0).
-    """
-    candidates = get_insurance_candidates_from_first_page(pages, header_page_count, num_lines, top_n=1)
-    if candidates:
-        return candidates[0]["text"], min(1.0, candidates[0]["score"])
-    return None, 0.0
-
-
-def detect_payor_and_practice_from_first_page(pages, header_page_count=1):
-    """
-    Enhanced detection for insurance (payor) and practice names from first page.
-    Priority:
-    1. Get candidates from first page, then check consistency across all pages.
-    2. If consistent, use it.
-    3. Otherwise, fallback to best candidate from first page + gazetteer.
-    """
-    if not pages:
-        return {"insurance_name": {"value": "", "confidence": 0.0},
-                "practice_name": {"value": "", "confidence": 0.0}}
-
-    header_pages = pages[:max(1, header_page_count)]
-    combined_text = "\n\n".join(p["text"] for p in header_pages)
-    lines = combined_text.split('\n')
-
-    result = {
-        "insurance_name": {"value": "", "confidence": 0.0, "source": ""},
-        "practice_name": {"value": "", "confidence": 0.0, "source": ""}
+    # If a configured name/alias is contained in a longer header line,
+    # always return the canonical list value. This prevents PDF noise such as
+    # "Payee Tax ID" or another name from being included in the result.
+    matched_compact = re.sub(r"[^a-z0-9]", "", best["matched_text"].lower())
+    canonical_compact = re.sub(r"[^a-z0-9]", "", best["canonical"].lower())
+    value = (
+        best["canonical"]
+        if matched_compact == canonical_compact
+        else best["matched_text"]
+    )
+    return {
+        "value": value,
+        "confidence": round(best["score"], 3),
+        "source": "known_payor_matching" if entity_type == "payor" else "known_practice_matching",
+        "matched_name": best["canonical"],
+        "file_text": best["matched_text"],
+        "match_score": round(best["match_score"], 3),
+        "page_presence": best["page_presence"],
+        "page_ratio": round(best["page_ratio"], 3),
+        "line_number": best["line_number"],
     }
 
-    # ------------------------------------------------------------
-    #  INSURANCE: Priority 1 – candidates from first page, check across pages
-    # ------------------------------------------------------------
-    first_page_candidates = get_insurance_candidates_from_first_page(pages, header_page_count, top_n=10)
-    if first_page_candidates:
-        consistent_candidate, conf = check_candidates_across_pages(first_page_candidates, pages, threshold=0.8)
-        if consistent_candidate and conf >= 0.7:
-            result["insurance_name"] = {
-                "value": consistent_candidate,
-                "confidence": conf,
-                "source": "page_wide_consistency_from_first_page"
-            }
 
-    # ------------------------------------------------------------
-    #  INSURANCE: Priority 2 – best candidate from first page (fallback)
-    # ------------------------------------------------------------
-    if not result["insurance_name"]["value"] or result["insurance_name"]["confidence"] < 0.7:
-        cand, conf = extract_insurance_from_first_lines(pages, header_page_count)
-        if cand and conf >= 0.3:
-            result["insurance_name"] = {
-                "value": cand,
-                "confidence": conf,
-                "source": "first_lines_scan"
-            }
+def extract_insurance_from_header(pages, header_page_count=1):
+    result = _find_best_known_entity(pages, "payor", header_page_count)
+    return result["value"] or None, result["confidence"]
 
-    # ------------------------------------------------------------
-    #  INSURANCE: Priority 3 – gazetteer (known payer)
-    # ------------------------------------------------------------
-    if not result["insurance_name"]["value"] or result["insurance_name"]["confidence"] < 0.5:
-        for line in lines:
-            is_known, canonical = matches_known_payer(line)
-            if is_known:
-                match = re.search(
-                    r'([A-Z][A-Za-z ,.&\-]{3,60}(?:Insurance|Company|Corp|Inc|Aetna|Blue|Cross|United|Cigna|Humana)\b)',
-                    line, re.I
-                )
-                if match:
-                    value = match.group(1).strip()
-                else:
-                    if line[0].isupper() and len(line.strip()) > 5:
-                        value = line.strip()
-                    else:
-                        value = canonical
-                confidence = 0.85
-                if confidence > result["insurance_name"]["confidence"]:
-                    result["insurance_name"] = {
-                        "value": value,
-                        "confidence": confidence,
-                        "source": "gazetteer"
-                    }
-                    break
 
-    # ------------------------------------------------------------
-    #  PRACTICE NAME: existing fallbacks (no alias)
-    # ------------------------------------------------------------
-    # 1. "Pay To" section
-    if not result["practice_name"]["value"] or result["practice_name"]["confidence"] < 0.5:
-        pay_to_section = re.search(r'Pay\s*To[:\s]+([A-Z][A-Za-z ,.&\-]{3,60})', combined_text, re.IGNORECASE)
-        if pay_to_section:
-            value = pay_to_section.group(1).strip()
-            if len(value) > 3 and not _is_boilerplate(value):
-                confidence = 0.85
-                if re.search(r'(LLC|PLLC|PC|PA)', value, re.IGNORECASE):
-                    confidence = 0.95
-                if confidence > result["practice_name"]["confidence"]:
-                    result["practice_name"] = {
-                        "value": value,
-                        "confidence": confidence,
-                        "source": "pay_to"
-                    }
+def extract_practice_from_header(pages, header_page_count=1):
+    result = _find_best_known_entity(pages, "practice", header_page_count)
+    return result["value"] or None, result["confidence"]
 
-    # 2. Patterns ending with LLC, PC, etc.
-    if not result["practice_name"]["value"] or result["practice_name"]["confidence"] < 0.5:
-        practice_patterns = [
-            r'([A-Z][A-Za-z ,.&\-]{3,50}(?:LLC|PLLC|PC|P\.C\.|P\.A\.|Associates|Medical\s+Group|Clinic|Family\s+Practice))\b',
-            r'([A-Z][A-Za-z ,.&\-]{3,50}(?:MD|DO|DDS|DMD|DC|PhD)(?:\s+[A-Z][A-Za-z]+)?\s+(?:&|and)\s+[A-Z][A-Za-z]+)',
-        ]
-        for pattern in practice_patterns:
-            for match in re.finditer(pattern, combined_text, re.IGNORECASE):
-                value = match.group(1).strip()
-                if len(value) > 5 and any(c.isalpha() for c in value) and not _is_boilerplate(value):
-                    confidence = 0.70
-                    if re.search(r'(LLC|PLLC|PC|PA|Associates|Medical\s+Group)', value, re.IGNORECASE):
-                        confidence += 0.15
-                    if len(value) > 15:
-                        confidence += 0.10
-                    if confidence > result["practice_name"]["confidence"]:
-                        result["practice_name"] = {
-                            "value": value,
-                            "confidence": min(1.0, confidence),
-                            "source": "pattern"
-                        }
-                        break
-            if result["practice_name"]["value"]:
-                break
 
-    # 3. Address adjacency (line above a US address)
-    if not result["practice_name"]["value"] or result["practice_name"]["confidence"] < 0.5:
-        for i, line in enumerate(lines):
-            if not US_ADDRESS_LINE.search(line):
-                continue
-            for back in (1, 2):
-                idx = i - back
-                if idx < 0:
-                    continue
-                candidate = lines[idx].strip()
-                if (
-                    len(candidate) < 3
-                    or _is_boilerplate(candidate)
-                    or not candidate[0].isupper()
-                    or US_ADDRESS_LINE.search(candidate)
-                ):
-                    continue
-                if matches_known_payer(candidate, min_ratio=0.85)[0]:
-                    continue
-                confidence = 0.75 - (back - 1) * 0.10
-                if confidence > result["practice_name"]["confidence"]:
-                    result["practice_name"] = {
-                        "value": candidate,
-                        "confidence": confidence,
-                        "source": "address_adjacency"
-                    }
-                break
-
-    return result
+def detect_payor_and_practice_from_header(pages, header_page_count=1):
+    """Extract payor and practice only when they match the configured lists."""
+    header_pages = pages[:header_page_count] if pages else []
+    payor = _find_best_known_entity(header_pages, "payor", header_page_count)
+    practice = _find_best_known_entity(header_pages, "practice", header_page_count)
+    return {
+        "insurance_name": payor,
+        "practice_name": practice,
+    }
 
 
 def get_header_page_range(total_pages):
-    if total_pages >= 4:
-        return min(2, total_pages)
-    return min(1, total_pages)
+    if total_pages <= 0:
+        return 0
+    if total_pages > 4:
+        return 3
+    return min(2, total_pages)
+
+
 
 def get_candidate_pages(pages, header_page_count):
-    """
-    check_number/check_date/check_amount mostly live on page 1, 2, or the
-    LAST page (the check stub / remittance summary is often appended at the
-    end of a multi-page EOB). pages[:header_page_count] alone silently drops
-    that last page -- this returns header pages UNION the last page.
-    """
     total = len(pages)
     if total == 0:
         return []
     count = min(header_page_count, total)
     idx = set(range(count))
-    # For longer PDFs, include the last 3 pages unconditionally.
     if total > 4:
         idx.update(range(max(0, total - 3), total))
     else:
-        # For 4 pages or fewer, include the last page.
-        idx.add(total - 1)
+        idx.update(range(total))
     return [pages[i] for i in sorted(idx)]
 
+
 def extract_eob_data_from_pages(pages):
-    """
-    Extract all EOB fields from a FULL document (list of page dicts).
-    No spatial layout used – insurance extracted from first 20 lines.
-    """
+    """Extract all EOB fields from a full document."""
     if not pages:
         return {}
 
     total_pages = len(pages)
     header_page_count = get_header_page_range(total_pages)
-    header_pages = pages[:header_page_count]
-    candidate_pages = get_candidate_pages(pages, header_page_count)   # NEW: includes last page
+    candidate_pages = get_candidate_pages(pages, header_page_count)
 
-    header_text = "\n\n".join(p["text"] for p in header_pages)
+    header_pages = pages[:header_page_count]
     full_text = "\n\n".join(p["text"] for p in pages)
 
     result = {}
 
-    payor_practice_result = detect_payor_and_practice_from_first_page(pages, header_page_count)
+    result["check_number"] = extract_field_by_zone(candidate_pages, "check_number")
+    result["check_date"] = extract_field_by_zone(candidate_pages, "check_date")
 
-    for field in ["check_number", "check_date", "check_amount"]:
-        result[field] = extract_field_by_zone(candidate_pages, field)
+    if validate_check_number(result["check_number"].get("value", "")):
+        result["payment_status"] = "pay"
+        result["check_amount"] = extract_field_by_zone(candidate_pages, "check_amount")
+    else:
+        result["check_number"]["value"] = ""
+        result["check_number"]["confidence"] = 0.0
+        result["check_number"]["alias_used"] = None
+        result["payment_status"] = "no_pay"
+        result["check_amount"] = {
+            "value": "0",
+            "confidence": 1.0,
+            "alias_used": "no_pay_rule",
+            "direction": None,
+            "line_number": None,
+            "zone": None,
+            "label_level": None,
+            "page_number": None,
+            "zone_confidence_boost": 0.0,
+            "original_score": 1.0,
+            "match_type": "no_pay_rule",
+            "candidates_considered": 0,
+            "all_candidates": [],
+        }
+
+    # Extract payor and practice from header
+    payor_practice_result = detect_payor_and_practice_from_header(header_pages, header_page_count)
 
     if payor_practice_result.get("insurance_name", {}).get("value"):
         result["insurance_name"] = {
             "value": payor_practice_result["insurance_name"]["value"],
             "confidence": round(payor_practice_result["insurance_name"]["confidence"], 3),
             "alias_used": payor_practice_result["insurance_name"].get("source", "enhanced_detection"),
-            "direction": "first_page",
+            "direction": "header",
             "line_number": 1,
             "candidates_considered": 1,
             "all_candidates": []
         }
     else:
-        result["insurance_name"] = {"value": "", "confidence": 0.0, "alias_used": None, "direction": None, "line_number": None, "candidates_considered": 0, "all_candidates": []}
+        result["insurance_name"] = {
+            "value": "", "confidence": 0.0, "alias_used": None,
+            "direction": None, "line_number": None,
+            "candidates_considered": 0, "all_candidates": []
+        }
 
     if payor_practice_result.get("practice_name", {}).get("value"):
         result["practice_name"] = {
             "value": payor_practice_result["practice_name"]["value"],
             "confidence": round(payor_practice_result["practice_name"]["confidence"], 3),
             "alias_used": payor_practice_result["practice_name"].get("source", "enhanced_detection"),
-            "direction": "first_page",
+            "direction": "header",
             "line_number": 1,
             "candidates_considered": 1,
             "all_candidates": []
         }
     else:
-        result["practice_name"] = {"value": "", "confidence": 0.0, "alias_used": None, "direction": None, "line_number": None, "candidates_considered": 0, "all_candidates": []}
+        result["practice_name"] = {
+            "value": "", "confidence": 0.0, "alias_used": None,
+            "direction": None, "line_number": None,
+            "candidates_considered": 0, "all_candidates": []
+        }
 
     result["cpt_codes"] = extract_cpt_codes(full_text)
 
@@ -393,15 +241,4 @@ def extract_eob_data_from_pages(pages):
         "payor_practice_detection": payor_practice_result
     }
 
-    return result
-
-
-def extract_eob_data(text):
-    """Legacy helper for a single page's text."""
-    if not text or not isinstance(text, str):
-        return {}
-    result = {}
-    for field in ["check_number", "check_date", "check_amount", "practice_name", "insurance_name"]:
-        result[field] = extract_field(text, field)
-    result["cpt_codes"] = extract_cpt_codes(text)
     return result

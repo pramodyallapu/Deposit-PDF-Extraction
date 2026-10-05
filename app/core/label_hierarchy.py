@@ -22,7 +22,12 @@ FIELD_LABEL_HIERARCHY = {
             ("Check EFT No", 1.00),
             ("EFT#", 0.80),
             ("Trace Number", 0.60),
-            ("Check/EFT Trace Number", 0.80)
+            ("Check/EFT Trace Number", 0.80),
+            ("EOB NO", 0.30),
+            ("EOB NUMBER", 0.30),
+            ("Check/ACH#",0.70),
+            ("Check No", 0.60),
+            ("Check Number", 0.50)
         ],
         "level_2": [
             # Strong secondary options
@@ -38,6 +43,7 @@ FIELD_LABEL_HIERARCHY = {
         ],
         "level_3": [
             # Fallback options
+            ("ERA", 0.90),
             ("EFT Trace", 0.95),
             ("Trace Number", 0.95),
             ("Trace #", 0.90),
@@ -52,6 +58,8 @@ FIELD_LABEL_HIERARCHY = {
             ("EFT", 0.65),
             ("EFT#", 0.70),
             ("PAYDOLLARSCENTS", 0.70),
+            ("Remittance Tracking Number", 0.60),
+            ("REMITTANCE NO", 0.60)
         ],
         "rationale": "EPC Draft # is most specific (EFT/check system specific). Use it first."
     },
@@ -66,6 +74,10 @@ FIELD_LABEL_HIERARCHY = {
             ("Payment / Check Date", 1.00),
             ("Check Date", 1.00),
             ("CheckDate", 1.00),
+            ("Date", 0.30),
+            ("ISSUE DATE", 0.60),
+            ("Check/EFT Date", 0.50),
+            ("Received", 0.60)
         ],
         "level_2": [
             # Strong secondary
@@ -89,7 +101,9 @@ FIELD_LABEL_HIERARCHY = {
             ("Issued", 0.70),
             ("Service Date", 0.60),
             ("ServiceDate", 0.60),
-            ("Date", 0.50)
+            ("Date", 0.50),
+            ("Date Created", 0.90),
+            ("Received", 0.80)
         ],
         "rationale": "Payment/Check Date is most specific. Avoid Service Date (may be different)."
     },
@@ -105,13 +119,19 @@ FIELD_LABEL_HIERARCHY = {
             ("Check Amount", 1.00),
             ("CheckAmount", 1.00),
             ("Net Payment Amount", 1.00),
-            ("Amount Paid", 1.00),
-            ("PAYDOLLARSCENTS", 0.80),
-            ("PAY DOLLARS CENTS", 0.80),
+            ("PAYDOLLARSCENTS", 1.00),
+            ("PAY DOLLARS CENTS", 1.00),
             ("Card Value", 0.40),
             ("Trace Amount", 0.60),
             ("Payment Amount", 0.60),
             ("Claim Payment", 0.30),
+            ("Total Payment Amt", 0.70),
+            ("Amount of",0.35),
+            ("Check Total", 1.00),
+            ("BILLED Amount", 0.90),
+            ("Amount Paid", 0.65),
+            ("Payment", 0.50),
+            ("Net Amount Paid", 0.50)
         ],
         "level_2": [
             # Strong secondary
@@ -122,6 +142,10 @@ FIELD_LABEL_HIERARCHY = {
             ("Amount Paid", 0.92),
             ("AmountPaid", 0.92),
             ("Amount", 0.85),
+            ("Direct Deposit",0.75),
+            ("Payment of", 0.60),
+            ("NET", 0.60),
+            ("Amount of",0.40)
         ],
         "level_3": [
             # Fallback (generic/ambiguous)

@@ -104,6 +104,7 @@
         .preview-scroll {
             flex: 1; overflow: auto; padding: 16px; background: var(--paper-deep);
             display: flex; justify-content: center; align-items: flex-start;
+            position: relative;
         }
         .pdf-page-container { display: inline-block; position: relative; max-width: 100%; }
         .pdf-page-container .textLayer {
@@ -120,6 +121,31 @@
             color: var(--muted); font-size: 0.95rem; padding: 40px 20px; text-align: center;
         }
 
+        .preview-loader {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--paper-deep);
+            z-index: 10;
+            gap: 12px;
+        }
+        .preview-loader .spin-sm {
+            width: 28px;
+            height: 28px;
+            border: 3px solid var(--line);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        .preview-loader p {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--ink-soft);
+            margin: 0;
+        }
         /* Upload area */
         .upload-area {
             position: relative; padding: 28px 20px; text-align: center;
@@ -159,6 +185,7 @@
         .badge-status.done { background: var(--accent-tint); color: var(--accent-dark); }
         .badge-status.failed { background: var(--rose-tint); color: var(--rose); }
         .badge-status.approved { background: var(--accent); color: white; }
+        .badge-status.skipped { background: var(--paper-deep); color: var(--muted); }
 
         /* Ledger (extracted fields) */
         .ledger {
@@ -279,24 +306,62 @@
             color: #5c2422; font-size: 0.85rem; display: none;
         }
 
+        /* Full page spinner overlay */
         #spinnerOverlay {
-            position: fixed; inset: 0; background: rgba(237,239,231,0.82);
-            display: none; align-items: center; justify-content: center;
-            flex-direction: column; gap: 14px; z-index: 50;
+            position: fixed; inset: 0; background: rgba(237, 239, 231, 0.92); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 100;
         }
         #spinnerOverlay.show { display: flex; }
         .spin {
-            width: 38px; height: 38px; border: 3px solid var(--line);
+            width: 48px; height: 48px; border: 4px solid var(--line);
             border-top-color: var(--accent); border-radius: 50%;
             animation: spin 0.9s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes spin { to { transform: rotate(360deg); }}
         #spinnerOverlay p {
-            font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;
+            font-family: 'IBM Plex Mono', monospace;font-size: 0.9rem;
             color: var(--ink-soft);
+            margin: 0;
+            text-align: center;
+        }
+        #spinnerOverlay .sub-text {
+            font-size: 0.75rem;
+            color: var(--muted);
+            font-family: 'Inter', sans-serif;
         }
 
-        /* Responsive */
+        .batch-progress-bar {
+            height: 4px; background: var(--line); border-radius: 2px;
+            overflow: hidden; margin-top: 6px;
+        }
+        .batch-progress-bar .fill {
+            height: 100%; background: var(--accent); border-radius: 2px;
+            transition: width 0.3s ease; width: 0%;
+        }
+
+        /* Current file name header */
+        .current-file-header {
+            display: none;
+            padding: 8px 16px;
+            background: var(--paper-deep);
+            border: 1px solid var(--line);
+            border-radius: var(--radius) var(--radius) 0 0;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--ink-soft);
+            align-items: center;
+            gap: 8px;
+        }
+        .current-file-header i {
+            color: var(--accent);
+            font-size: 1rem;
+        }
+        .current-file-header .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         @media (max-width: 900px) {
             .main-content { flex-direction: column; padding: 16px; }
             .left-column { flex: none; max-height: 50vh; overflow-y: auto; }
@@ -316,9 +381,11 @@
     </style>
 </head>
 <body>
+    <!-- Full page spinner -->
     <div id="spinnerOverlay">
         <div class="spin"></div>
-        <p id="spinnerMessage">Reading the document…</p>
+        <p id="spinnerMessage">Processing…</p>
+        <p class="sub-text" id="spinnerSubText">Please wait</p>
     </div>
 
     <div class="app">
@@ -348,18 +415,34 @@
                     </div>
                     <div id="uploadStatus"></div>
 
-                    <!-- File list for bulk -->
-                    <div id="fileListContainer" style="display:none;">
-                        <div class="file-list" id="fileList"></div>
-                        <div style="margin-top:6px;">
-                            <button class="btn btn-primary" id="extractAllBtn" disabled><i class="bi bi-play-fill"></i> Extract All</button>
-                            <button class="btn btn-outline" id="clearFilesBtn"><i class="bi bi-x-circle"></i> Clear</button>
-                            <span id="progressMsg" style="font-size:0.8rem; color:var(--muted); margin-left:10px;"></span>
+                    <div style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="batchFolderInput" placeholder="Enter folder path for batch processing" style="flex:1; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; background: var(--paper); min-width: 200px;" />
+                            <button class="btn btn-primary" id="startBatchBtn"><i class="bi bi-folder2-open"></i> Start Batch</button>
+                        </div>
+                        <div style="font-size: 0.7rem; color: var(--muted); margin-top: 4px;">
+                            <i class="bi bi-info-circle"></i> Process all PDFs in a folder using the backend batch API
                         </div>
                     </div>
 
-                    <!-- Extracted fields (ledger) – shown during approval -->
+                    <div id="fileListContainer" style="display:none;">
+                        <div class="file-list" id="fileList"></div>
+                        <div style="margin-top:6px;">
+                            <button class="btn btn-primary" id="extractAllBtn"><i class="bi bi-play-fill"></i> Extract All</button>
+                            <button class="btn btn-outline" id="clearFilesBtn"><i class="bi bi-x-circle"></i> Clear</button>
+                            <span id="progressMsg" style="font-size:0.8rem; color:var(--muted); margin-left:10px;"></span>
+                        </div>
+                        <div class="batch-progress-bar" id="batchProgressContainer" style="display:none;">
+                            <div class="fill" id="batchProgressFill"></div>
+                        </div>
+                    </div>
+
                     <div id="resultsSection" style="display:none;">
+                        <!-- Current file name header -->
+                        <div class="current-file-header" id="currentFileHeader">
+                            <i class="bi bi-file-pdf"></i>
+                            <span class="file-name" id="currentFileNameText">Loading...</span>
+                        </div>
                         <div class="ledger">
                             <div class="ledger-row">
                                 <div class="row-label"><i class="bi bi-hash"></i> Check</div>
@@ -375,6 +458,11 @@
                                 <div class="row-label"><i class="bi bi-currency-dollar"></i> Amount</div>
                                 <div class="field-value" id="checkAmount">—</div>
                                 <div class="stamp" id="checkAmountConf">0%</div>
+                            </div>
+                            <div class="ledger-row">
+                                <div class="row-label"><i class="bi bi-info-circle"></i> Payment status</div>
+                                <div class="field-value" id="paymentStatus">—</div>
+                                <div class="stamp"></div>
                             </div>
                             <div class="ledger-row">
                                 <div class="row-label"><i class="bi bi-shield-check"></i> Insurance</div>
@@ -406,8 +494,11 @@
 
                         <div class="action-bar" id="actionBar">
                             <span class="badge-count" id="recordCounter"><i class="bi bi-database"></i> 0 records</span>
+                            <span id="batchFileCounter" style="font-size:0.75rem; color:var(--muted); display:none;"></span>
                             <div class="spacer"></div>
                             <button class="btn btn-primary" id="approveBtn"><i class="bi bi-check2-circle"></i> Approve &amp; Next</button>
+                            <button class="btn btn-outline" id="skipBtn" style="display:none;"><i class="bi bi-skip-forward"></i> Skip</button>
+                            <button class="btn btn-outline" id="abortBatchBtn" style="display:none; color: var(--rose); border-color: var(--rose);"><i class="bi bi-x-octagon"></i> Abort</button>
                             <span id="actionToast" class="toast-msg"></span>
                         </div>
                     </div>
@@ -432,24 +523,26 @@
     </div>
 
     <script>
-        // Configure PDF.js worker
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         // DOM refs
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
         const pdfContainer = document.getElementById('pdfPageContainer');
+        const previewScroll = document.getElementById('previewScroll');
         const pageInfo = document.getElementById('pageInfo');
         const resultsSection = document.getElementById('resultsSection');
         const errorAlert = document.getElementById('errorAlert');
         const spinner = document.getElementById('spinnerOverlay');
         const spinnerMsg = document.getElementById('spinnerMessage');
+        const spinnerSubText = document.getElementById('spinnerSubText');
         const uploadStatus = document.getElementById('uploadStatus');
 
         const fields = {
             checkNumber: document.getElementById('checkNumber'),
             checkDate: document.getElementById('checkDate'),
             checkAmount: document.getElementById('checkAmount'),
+            paymentStatus: document.getElementById('paymentStatus'),
             insuranceName: document.getElementById('insuranceName'),
             practiceName: document.getElementById('practiceName'),
             cptCodes: document.getElementById('cptCodes'),
@@ -463,23 +556,48 @@
         };
 
         const approveBtn = document.getElementById('approveBtn');
+        const skipBtn = document.getElementById('skipBtn');
+        const abortBatchBtn = document.getElementById('abortBatchBtn');
         const recordCounter = document.getElementById('recordCounter');
+        const batchFileCounter = document.getElementById('batchFileCounter');
         const actionToast = document.getElementById('actionToast');
+        const currentFileHeader = document.getElementById('currentFileHeader');
+        const currentFileNameText = document.getElementById('currentFileNameText');
 
-        // Bulk elements
         const fileListContainer = document.getElementById('fileListContainer');
         const fileList = document.getElementById('fileList');
         const extractAllBtn = document.getElementById('extractAllBtn');
         const clearFilesBtn = document.getElementById('clearFilesBtn');
         const progressMsg = document.getElementById('progressMsg');
+        const batchProgressContainer = document.getElementById('batchProgressContainer');
+        const batchProgressFill = document.getElementById('batchProgressFill');
+        const batchFolderInput = document.getElementById('batchFolderInput');
+        const startBatchBtn = document.getElementById('startBatchBtn');
 
         // State
         let submittedRecords = [];
-        let selectedFiles = []; // array of { file: File, status: string }
-        let bulkResults = [];   // array of { filename, status } for summary tracking
+        let selectedFiles = [];
         let isProcessing = false;
-        let currentIndex = 0;
+        let currentBatchId = null;
+        let pollingInterval = null;
         let waitingForApproval = false;
+        let batchMode = false;
+        let abortRequested = false;
+        let isPolling = false;
+        let lastStatus = null;
+        let hasShownCurrentForCurrentFile = false;
+        let isWaitingForNextFile = false;
+
+        // ---------- Spinner helpers ----------
+        function showSpinner(message = 'Processing…', subText = 'Please wait') {
+            spinnerMsg.textContent = message;
+            spinnerSubText.textContent = subText;
+            spinner.classList.add('show');
+        }
+
+        function hideSpinner() {
+            spinner.classList.remove('show');
+        }
 
         // ---------- helpers ----------
         function stampClass(confidence) {
@@ -525,6 +643,7 @@
             fields.checkNumber.textContent = '—';
             fields.checkDate.textContent = '—';
             fields.checkAmount.textContent = '—';
+            fields.paymentStatus.textContent = '—';
             fields.insuranceName.value = '';
             fields.practiceName.value = '';
             fields.cptCodes.innerHTML = '';
@@ -538,15 +657,39 @@
             confs.cptConf.textContent = '0%';
             confs.cptConf.className = 'stamp';
             resultsSection.style.display = 'none';
-            // Reset textarea heights
             fields.insuranceName.style.height = 'auto';
             fields.practiceName.style.height = 'auto';
+            approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+            abortBatchBtn.style.display = 'none';
+            batchFileCounter.style.display = 'none';
+            currentFileHeader.style.display = 'none';
+            currentFileNameText.textContent = '';
+            hasShownCurrentForCurrentFile = false;
+            isWaitingForNextFile = false;
         }
 
-        // Clear the PDF preview area
         function clearPreview() {
             pdfContainer.innerHTML = `<div class="no-pdf-message">No PDF loaded</div>`;
             pageInfo.textContent = '—';
+        }
+
+        function showPreviewLoader(message = 'Loading PDF...') {
+            const existing = previewScroll.querySelector('.preview-loader');
+            if (existing) existing.remove();
+
+            const loader = document.createElement('div');
+            loader.className = 'preview-loader';
+            loader.innerHTML = `
+                <div class="spin-sm"></div>
+                <p>${message}</p>
+            `;
+            previewScroll.appendChild(loader);
+        }
+
+        function hidePreviewLoader() {
+            const existing = previewScroll.querySelector('.preview-loader');
+            if (existing) existing.remove();
         }
 
         function setFieldWithConf(id, value, confidence) {
@@ -557,7 +700,6 @@
             confEl.className = `stamp ${stampClass(confidence)}`;
         }
 
-        // Auto-grow for textareas
         function autoGrowTextarea(textarea) {
             if (!textarea) return;
             textarea.style.height = 'auto';
@@ -565,8 +707,13 @@
             textarea.style.height = textarea.scrollHeight + 'px';
         }
 
+        function escapeHtml(unsafe) {
+            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
         // ---------- PDF rendering ----------
         async function renderPdfPage(pdfData, pageNumber = 1, scale = 1.5) {
+            showPreviewLoader('Rendering PDF...');
             try {
                 const loadingTask = pdfjsLib.getDocument({ data: pdfData });
                 const pdf = await loadingTask.promise;
@@ -643,14 +790,34 @@
                 pdfContainer.appendChild(wrapper);
                 pdfContainer.style.display = 'inline-block';
                 pageInfo.textContent = `Page ${pageNumber} of ${pdf.numPages}`;
+                hidePreviewLoader();
 
             } catch (err) {
                 console.error('PDF render error:', err);
+                hidePreviewLoader();
                 pdfContainer.innerHTML = `
-                        <div class="no-pdf-message" style="color:var(--rose);">
-                            Failed to render PDF: ${err.message}
-                        </div>
-                    `;
+                    <div class="no-pdf-message" style="color:var(--rose);">
+                        Failed to render PDF: ${err.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function renderPdfFromUrl(pdfUrl, pageNumber = 1, scale = 1.5) {
+            showPreviewLoader('Loading PDF...');
+            try {
+                const response = await fetch(pdfUrl);
+                if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`);
+                const pdfData = await response.arrayBuffer();
+                await renderPdfPage(pdfData, pageNumber, scale);
+            } catch (err) {
+                console.error('PDF render from URL error:', err);
+                hidePreviewLoader();
+                pdfContainer.innerHTML = `
+                    <div class="no-pdf-message" style="color:var(--rose);">
+                        Failed to load PDF preview: ${err.message}
+                    </div>
+                `;
             }
         }
 
@@ -658,7 +825,7 @@
         async function extractSingleFile(file) {
             const formData = new FormData();
             formData.append('file', file);
-            const response = await fetch('api/extract', { method: 'POST', body: formData });
+            const response = await fetch('/api/extract', { method: 'POST', body: formData });
             if (!response.ok) {
                 const errText = await response.text();
                 throw new Error(`Server error (${response.status}): ${errText}`);
@@ -667,7 +834,7 @@
         }
 
         async function submitRecord(record) {
-            const res = await fetch('api/records', {
+            const res = await fetch('/api/records', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(record),
@@ -679,32 +846,329 @@
             return res.json();
         }
 
-        // ---------- Bulk sequential extraction with approval ----------
-        async function processBulk() {
+        async function loadRecords() {
+            try {
+                const res = await fetch('/api/records');
+                if (res.ok) {
+                    const data = await res.json();
+                    submittedRecords = data;
+                    updateCounter();
+                }
+            } catch (e) { console.warn('Could not load records:', e); }
+        }
+
+        // ---------- Backend Batch API ----------
+        async function startBackendBatch(folderPath) {
             if (isProcessing) return;
-            if (selectedFiles.length === 0) return;
+            if (!folderPath || folderPath.trim() === '') {
+                showToast('Please enter a folder path.', false);
+                return;
+            }
+
             isProcessing = true;
+            batchMode = true;
+            abortRequested = false;
+            resetLedger();
+            clearPreview();
+            hideError();
+            resultsSection.style.display = 'block';
+            showSpinner('Starting batch…', `Loading files from ${folderPath}`);
+
+            try {
+                const response = await fetch('/api/extract-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_location: folderPath.trim() }),
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Batch start failed');
+                }
+
+                const data = await response.json();
+                currentBatchId = data.batch_id;
+
+                abortBatchBtn.style.display = 'inline-flex';
+                abortBatchBtn.onclick = () => {
+                    abortRequested = true;
+                    showToast('Abort requested...', false);
+                };
+
+                batchFileCounter.style.display = 'inline';
+                batchFileCounter.textContent = `📁 ${data.total_files} files`;
+
+                showToast(`Batch started: ${data.total_files} files`);
+                hideSpinner();
+
+                // Start polling with a single status endpoint
+                if (pollingInterval) clearInterval(pollingInterval);
+                isPolling = false;
+                isWaitingForNextFile = false;
+                pollingInterval = setInterval(() => pollBatch(), 1500);
+
+                // Initial poll
+                await pollBatch();
+
+            } catch (err) {
+                hideSpinner();
+                showError(`Batch failed: ${err.message}`);
+                isProcessing = false;
+                batchMode = false;
+                abortBatchBtn.style.display = 'none';
+            }
+        }
+
+        async function pollBatch() {
+            if (isPolling || !currentBatchId) return;
+            isPolling = true;
+
+            try {
+                const response = await fetch(`/api/extract-batch/${currentBatchId}/status`);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                        showToast('Batch not found.', false);
+                        isPolling = false;
+                        return;
+                    }
+                    throw new Error(`Status check failed: ${response.status}`);
+                }
+
+                const status = await response.json();
+                lastStatus = status;
+
+                // Update progress
+                const progress = status.total > 0 ? (status.current / status.total) * 100 : 0;
+                batchProgressContainer.style.display = 'block';
+                batchProgressFill.style.width = `${Math.min(progress, 100)}%`;
+                progressMsg.textContent = `Processing ${status.current}/${status.total}...`;
+
+                // Update counters
+                batchFileCounter.textContent = `📁 ${status.total} files | ✅ ${status.approved_count} | ⏭️ ${status.skipped_count} | ❌ ${status.failed_count}`;
+
+                // Check if waiting for approval AND not already processed
+                if (status.waiting_for_approval && status.current_status === 'waiting_approval') {
+                    // Only fetch current if we haven't shown it for this file yet
+                    if (!status.approval_processed && !hasShownCurrentForCurrentFile) {
+                        // Hide spinner if it was showing (we're about to show results)
+                        hideSpinner();
+                        showPreviewLoader('Loading extracted data...');
+                        await fetchAndShowCurrent();
+                        hidePreviewLoader();
+                        hasShownCurrentForCurrentFile = true;
+                        isWaitingForNextFile = false;
+                    } else if (status.approval_processed) {
+                        // Approval was processed, reset the flag for next file
+                        hasShownCurrentForCurrentFile = false;
+                        isWaitingForNextFile = false;
+                    }
+                } else {
+                    // Not waiting for approval
+                    if (isWaitingForNextFile && !status.waiting_for_approval) {
+                        // Still waiting for next file, keep spinner showing
+                        // The backend is extracting the next file
+                    }
+                    hasShownCurrentForCurrentFile = false;
+                }
+
+                // Check if completed
+                if (status.status === 'completed') {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    isProcessing = false;
+                    batchMode = false;
+                    abortBatchBtn.style.display = 'none';
+                    batchProgressFill.style.width = '100%';
+                    progressMsg.textContent = `✅ Batch completed! ${status.approved_count} approved, ${status.skipped_count} skipped, ${status.failed_count} failed.`;
+                    showToast(`Batch completed. ${status.approved_count} records added.`);
+                    await loadRecords();
+                    resetLedger();
+                    clearPreview();
+                    hideSpinner();
+                    isWaitingForNextFile = false;
+                }
+
+                if (status.status === 'cancelled') {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    isProcessing = false;
+                    batchMode = false;
+                    abortBatchBtn.style.display = 'none';
+                    showToast('Batch cancelled.', false);
+                    resetLedger();
+                    clearPreview();
+                    hideSpinner();
+                    isWaitingForNextFile = false;
+                }
+
+            } catch (err) {
+                console.error('Poll error:', err);
+            } finally {
+                isPolling = false;
+            }
+        }
+
+        async function fetchAndShowCurrent() {
+            if (!currentBatchId) return;
+
+            try {
+                const response = await fetch(`/api/extract-batch/${currentBatchId}/current`);
+                if (!response.ok) return;
+
+                const data = await response.json();
+
+                if (data.result) {
+                    const result = data.result;
+
+                    // Show filename
+                    if (data.current_file) {
+                        currentFileNameText.textContent = data.current_file;
+                        currentFileHeader.style.display = 'flex';
+                    }
+
+                    // Populate ledger
+                    const cpt = result.cpt_codes || { cpt_codes: [], extraction_confidence: 0 };
+                    setFieldWithConf('checkNumber', result.check_number?.value || '', result.check_number?.confidence || 0);
+                    setFieldWithConf('checkDate', result.check_date?.value || '', result.check_date?.confidence || 0);
+                    setFieldWithConf('checkAmount', result.check_amount?.value || '', result.check_amount?.confidence || 0);
+                    fields.paymentStatus.textContent = result.payment_status || '—';
+                    fields.insuranceName.value = result.insurance_name?.value || '';
+                    fields.practiceName.value = result.practice_name?.value || '';
+                    fields.cptCodes.innerHTML = cpt.cpt_codes?.length > 0 ?
+                        cpt.cpt_codes.map(c => `<span class="cpt-chip">${c}</span>`).join('') :
+                        '<span class="no-stamp">None found</span>';
+                    fields.cptCount.textContent = cpt.cpt_total_occurrences || 0;
+                    const cptPct = cpt.extraction_confidence || 0;
+                    confs.cptConf.textContent = `${(cptPct * 100).toFixed(1)}%`;
+                    confs.cptConf.className = `stamp ${stampClass(cptPct)}`;
+
+                    resultsSection.style.display = 'block';
+
+                    requestAnimationFrame(() => {
+                        autoGrowTextarea(fields.insuranceName);
+                        autoGrowTextarea(fields.practiceName);
+                    });
+
+                    // Show approve/skip buttons
+                    approveBtn.disabled = false;
+                    approveBtn.textContent = '✅ Approve & Next';
+                    skipBtn.style.display = 'inline-flex';
+                    skipBtn.textContent = '⏭️ Skip';
+
+                    // Render the PDF preview
+                    if (data.current_file && currentBatchId) {
+                        const encodedFilename = encodeURIComponent(data.current_file);
+                        const pdfUrl = `/api/extract-batch/${currentBatchId}/file/${encodedFilename}`;
+                        await renderPdfFromUrl(pdfUrl, 1, 1.5);
+                    }
+
+                    // Set up approval handlers - these show spinner and wait for next file
+                    approveBtn.onclick = async function handler() {
+                        approveBtn.disabled = true;
+                        skipBtn.disabled = true;
+                        // Hide the results and show spinner while processing
+                        resetLedger();
+                        clearPreview();
+                        showSpinner('Loading next file');
+                        isWaitingForNextFile = true;
+
+                        const record = getCurrentRecordFromLedger();
+                        try {
+                            const res = await fetch(`/api/extract-batch/${currentBatchId}/approve`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(record),
+                            });
+                            if (!res.ok) throw new Error('Approval failed');
+                            showToast('✅ Approved');
+                            // Don't hide spinner - wait for next file
+                            // The poll will handle showing the next file
+                        } catch (err) {
+                            hideSpinner();
+                            showToast(`Approval failed: ${err.message}`, false);
+                            approveBtn.disabled = false;
+                            skipBtn.disabled = false;
+                            isWaitingForNextFile = false;
+                        }
+                    };
+
+                    skipBtn.onclick = async function handler() {
+                        skipBtn.disabled = true;
+                        approveBtn.disabled = true;
+                        // Hide the results and show spinner while processing
+                        resetLedger();
+                        clearPreview();
+                        showSpinner('Skipping…', 'Moving to next file');
+                        isWaitingForNextFile = true;
+
+                        try {
+                            const res = await fetch(`/api/extract-batch/${currentBatchId}/skip`, {
+                                method: 'POST',
+                            });
+                            if (!res.ok) throw new Error('Skip failed');
+                            showToast('⏭️ Skipped');
+                            // Don't hide spinner - wait for next file
+                            // The poll will handle showing the next file
+                        } catch (err) {
+                            hideSpinner();
+                            showToast(`Skip failed: ${err.message}`, false);
+                            skipBtn.disabled = false;
+                            approveBtn.disabled = false;
+                            isWaitingForNextFile = false;
+                        }
+                    };
+                }
+
+                if (data.error) {
+                    showToast(`Error: ${data.error}`, false);
+                    // Auto-skip on error
+                    try {
+                        await fetch(`/api/extract-batch/${currentBatchId}/skip`, { method: 'POST' });
+                    } catch (e) {}
+                }
+
+            } catch (err) {
+                console.error('Fetch current error:', err);
+                hideSpinner();
+            }
+        }
+
+        // ---------- Manual bulk processing ----------
+        async function startManualBatch(files) {
+            if (isProcessing) return;
+            if (files.length === 0) return;
+
+            isProcessing = true;
+            batchMode = false;
             extractAllBtn.disabled = true;
             clearFilesBtn.disabled = true;
-            bulkResults = [];
             resetLedger();
             clearPreview();
             hideError();
 
             let processedCount = 0;
-            const total = selectedFiles.length;
-            currentIndex = 0;
-
-            approveBtn.disabled = true;
-
-            while (currentIndex < total) {
-                const item = selectedFiles[currentIndex];
+            const total = files.length;
+            for (let i = 0; i < total; i++) {
+                const item = files[i];
                 const file = item.file;
+
+                showSpinner(`Extracting ${file.name}…`, `File ${i+1}/${total}`);
+
                 item.status = 'extracting';
                 updateFileList();
-                progressMsg.textContent = `Processing ${currentIndex+1}/${total}...`;
 
-                // Render first page
+                const progress = Math.round(((i) / total) * 100);
+                batchProgressContainer.style.display = 'block';
+                batchProgressFill.style.width = `${progress}%`;
+                progressMsg.textContent = `Processing ${i+1}/${total}...`;
+
+                // Show filename
+                currentFileNameText.textContent = file.name;
+                currentFileHeader.style.display = 'flex';
+
+                // Render preview
                 try {
                     const reader = new FileReader();
                     const pdfData = await new Promise((resolve, reject) => {
@@ -715,34 +1179,26 @@
                     await renderPdfPage(pdfData, 1, 1.5);
                 } catch (err) {
                     console.warn('Preview failed:', err);
-                    // Continue extraction anyway
                 }
 
                 // Extract
-                let extractionSuccess = false;
                 let data = null;
-                let errorMsg = '';
                 try {
                     data = await extractSingleFile(file);
-                    extractionSuccess = true;
                 } catch (err) {
-                    errorMsg = err.message;
-                }
-
-                if (!extractionSuccess) {
-                    showToast(`Failed: ${file.name} – ${errorMsg}`, false);
-                    bulkResults.push({ filename: file.name, status: 'failed' });
+                    hideSpinner();
+                    showToast(`Failed: ${file.name} – ${err.message}`, false);
                     item.status = 'failed';
                     updateFileList();
-                    currentIndex++;
                     continue;
                 }
 
-                // Success – populate ledger
+                // Populate ledger
                 const cpt = data.cpt_codes;
                 setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
                 setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
                 setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
+                fields.paymentStatus.textContent = data.payment_status || '—';
                 fields.insuranceName.value = data.insurance_name.value || '';
                 fields.practiceName.value = data.practice_name.value || '';
                 fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
@@ -755,79 +1211,79 @@
 
                 resultsSection.style.display = 'block';
 
-                // Auto-grow textareas
                 requestAnimationFrame(() => {
                     autoGrowTextarea(fields.insuranceName);
                     autoGrowTextarea(fields.practiceName);
                 });
 
+                hideSpinner();
+
+                // Wait for user approval
                 approveBtn.disabled = false;
                 approveBtn.textContent = '✅ Approve & Next';
+                skipBtn.style.display = 'inline-flex';
+                skipBtn.textContent = '⏭️ Skip';
 
                 waitingForApproval = true;
+
                 const action = await new Promise((resolve) => {
                     const onApprove = () => {
                         approveBtn.disabled = true;
                         resolve('approve');
                     };
+                    const onSkip = () => {
+                        approveBtn.disabled = true;
+                        resolve('skip');
+                    };
                     approveBtn.onclick = onApprove;
+                    skipBtn.onclick = onSkip;
                 });
 
-                // Process approval
+                waitingForApproval = false;
+
                 if (action === 'approve') {
+                    showSpinner('Saving record…', 'Submitting to database');
                     const record = getCurrentRecordFromLedger();
-                    const duplicate = submittedRecords.some(r =>
-                        r.checkNumber === record.checkNumber &&
-                        r.checkDate === record.checkDate &&
-                        r.checkAmount === record.checkAmount
-                    );
-                    if (!duplicate) {
-                        try {
-                            await submitRecord(record);
-                            submittedRecords.push({ ...record });
-                            updateCounter();
-                            showToast(`✅ Record #${submittedRecords.length} added.`);
-                        } catch (err) {
-                            showToast(`Submission failed: ${err.message}`, false);
-                            bulkResults.push({ filename: file.name, status: 'submission_failed' });
-                            item.status = 'failed';
-                            updateFileList();
-                            resetLedger();
-                            clearPreview();
-                            currentIndex++;
-                            continue;
-                        }
-                    } else {
-                        showToast('⏭️ Duplicate skipped.', false);
+                    try {
+                        await submitRecord(record);
+                        submittedRecords.push({ ...record });
+                        updateCounter();
+                        showToast(`✅ Record added.`);
+                        item.status = 'approved';
+                    } catch (err) {
+                        showToast(`Submission failed: ${err.message}`, false);
+                        item.status = 'failed';
                     }
-                    bulkResults.push({ filename: file.name, status: 'approved' });
-                    item.status = 'approved';
+                    hideSpinner();
+                } else {
+                    showToast(`⏭️ Skipped: ${file.name}`, false);
+                    item.status = 'skipped';
                 }
 
-                // Clear preview and ledger
-                clearPreview();
-                resetLedger();
-
-                updateFileList();
-                currentIndex++;
                 processedCount++;
+                updateFileList();
+                resetLedger();
+                clearPreview();
             }
 
-            // Done
             isProcessing = false;
-            waitingForApproval = false;
+            batchMode = false;
             extractAllBtn.disabled = false;
             clearFilesBtn.disabled = false;
+            batchProgressFill.style.width = '100%';
             progressMsg.textContent = `✅ Done — ${processedCount} files processed.`;
-            const approvedCount = bulkResults.filter(r => r.status === 'approved').length;
-            showToast(`Completed. ${approvedCount} approved.`);
+            showToast(`Completed. ${processedCount} files processed.`);
             approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+            abortBatchBtn.style.display = 'none';
+            hideSpinner();
         }
 
         function updateFileList() {
             if (selectedFiles.length === 0) {
                 fileListContainer.style.display = 'none';
                 extractAllBtn.disabled = true;
+                batchProgressContainer.style.display = 'none';
                 return;
             }
             fileListContainer.style.display = 'block';
@@ -837,18 +1293,17 @@
                 else if (item.status === 'done') cls += ' done';
                 else if (item.status === 'failed') cls += ' failed';
                 else if (item.status === 'approved') cls += ' approved';
-                else if (item.status === 'skipped') cls += ' done';
+                else if (item.status === 'skipped') cls += ' skipped';
                 return `
-                        <div class="file-item">
-                            <span>${item.file.name}</span>
-                            <span class="${cls}">${item.status || 'pending'}</span>
-                        </div>
-                    `;
+                    <div class="file-item">
+                        <span>${item.file.name}</span>
+                        <span class="${cls}">${item.status || 'pending'}</span>
+                    </div>
+                `;
             }).join('');
             extractAllBtn.disabled = false;
         }
 
-        // ---------- Clear files ----------
         clearFilesBtn.addEventListener('click', function() {
             if (isProcessing) return;
             selectedFiles = [];
@@ -856,26 +1311,60 @@
             updateFileList();
             uploadStatus.textContent = '';
             hideError();
-            bulkResults = [];
             resetLedger();
             clearPreview();
             progressMsg.textContent = '';
             approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+            abortBatchBtn.style.display = 'none';
+            batchProgressContainer.style.display = 'none';
+            batchProgressFill.style.width = '0%';
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+            currentBatchId = null;
+            batchMode = false;
+            hidePreviewLoader();
+            hasShownCurrentForCurrentFile = false;
+            isWaitingForNextFile = false;
+            currentFileHeader.style.display = 'none';
+            currentFileNameText.textContent = '';
+            hideSpinner();
         });
 
-        // Extract All
-        extractAllBtn.addEventListener('click', processBulk);
+        extractAllBtn.addEventListener('click', function() {
+            const files = selectedFiles.filter(f => f.status !== 'approved' && f.status !== 'skipped' && f.status !== 'failed');
+            if (files.length === 0) {
+                showToast('No pending files to extract.', false);
+                return;
+            }
+            startManualBatch(selectedFiles);
+        });
 
-        // ---------- Single file mode (if only one selected) ----------
+        startBatchBtn.addEventListener('click', function() {
+            startBackendBatch(batchFolderInput.value);
+        });
+
+        batchFolderInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                startBackendBatch(batchFolderInput.value);
+            }
+        });
+
+        // ---------- Single file mode ----------
         async function handleSingleFile(file) {
             resetLedger();
             clearPreview();
             hideError();
             uploadStatus.textContent = `Selected: ${file.name}`;
 
+            // Show filename
+            currentFileNameText.textContent = file.name;
+            currentFileHeader.style.display = 'flex';
+
             const isText = file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.text');
             if (isText) {
-                // Read text file and display content
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const content = e.target.result;
@@ -884,7 +1373,6 @@
                 };
                 reader.readAsText(file);
             } else {
-                // PDF: render preview
                 const reader = new FileReader();
                 reader.onload = async function(e) {
                     const pdfData = e.target.result;
@@ -893,17 +1381,15 @@
                 reader.readAsArrayBuffer(file);
             }
 
-            // Perform extraction (same for both)
-            spinner.classList.add('show');
-            spinnerMsg.textContent = `Extracting ${file.name}…`;
+            showSpinner(`Extracting ${file.name}…`, 'This may take a moment');
             try {
                 const data = await extractSingleFile(file);
 
-                // ---- Populate ledger with extracted data ----
                 const cpt = data.cpt_codes;
                 setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
                 setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
                 setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
+                fields.paymentStatus.textContent = data.payment_status || '—';
                 fields.insuranceName.value = data.insurance_name.value || '';
                 fields.practiceName.value = data.practice_name.value || '';
                 fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
@@ -916,15 +1402,17 @@
 
                 resultsSection.style.display = 'block';
 
-                // Auto-grow textareas
                 requestAnimationFrame(() => {
                     autoGrowTextarea(fields.insuranceName);
                     autoGrowTextarea(fields.practiceName);
                 });
 
-                // Set up approve button (single file mode)
+                hideSpinner();
+
                 approveBtn.textContent = '✅ Approve';
                 approveBtn.disabled = false;
+                skipBtn.style.display = 'none';
+                abortBatchBtn.style.display = 'none';
                 approveBtn.onclick = async function() {
                     const record = getCurrentRecordFromLedger();
                     const duplicate = submittedRecords.some(r =>
@@ -938,52 +1426,47 @@
                         clearPreview();
                         return;
                     }
+                    showSpinner('Saving record…', 'Submitting to database');
                     try {
                         await submitRecord(record);
                         submittedRecords.push({ ...record });
                         updateCounter();
                         showToast(`✅ Record #${submittedRecords.length} added.`);
+                        hideSpinner();
                         resetLedger();
                         clearPreview();
+                        uploadStatus.textContent = '';
                     } catch (err) {
+                        hideSpinner();
                         showToast(`Failed: ${err.message}`, false);
                     }
                 };
             } catch (err) {
+                hideSpinner();
                 showError(`Extraction failed: ${err.message}`);
                 resultsSection.style.display = 'none';
             } finally {
-                spinner.classList.remove('show');
+                hideSpinner();
             }
-        }
-
-        // Helper to escape HTML for text preview
-        function escapeHtml(unsafe) {
-            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        }
-
-        // ---- Load records from server ----
-        async function loadRecordsFromServer() {
-            try {
-                const res = await fetch('api/records');
-                if (res.ok) {
-                    const data = await res.json();
-                    submittedRecords = data;
-                    updateCounter();
-                }
-            } catch (e) { console.warn('Could not load records:', e); }
         }
 
         // ---- Upload events ----
         fileInput.addEventListener('change', (e) => {
             const files = e.target.files;
             if (!files.length) return;
+
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+
             if (files.length === 1) {
                 selectedFiles = [];
                 fileListContainer.style.display = 'none';
                 handleSingleFile(files[0]);
                 return;
             }
+
             resetLedger();
             clearPreview();
             resultsSection.style.display = 'none';
@@ -992,9 +1475,17 @@
             uploadStatus.textContent = `${selectedFiles.length} files selected.`;
             hideError();
             pdfContainer.innerHTML = `<div class="no-pdf-message">${selectedFiles.length} files ready for bulk extraction.</div>`;
-            pageInfo.textContent = 'Bulk mode';
+            pageInfo.textContent = 'Manual bulk mode';
             progressMsg.textContent = '';
             approveBtn.disabled = true;
+            skipBtn.style.display = 'none';
+            abortBatchBtn.style.display = 'none';
+            batchFileCounter.style.display = 'none';
+            hasShownCurrentForCurrentFile = false;
+            isWaitingForNextFile = false;
+            currentFileHeader.style.display = 'none';
+            currentFileNameText.textContent = '';
+            hideSpinner();
         });
 
         uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
@@ -1010,9 +1501,36 @@
             fileInput.dispatchEvent(new Event('change'));
         });
 
+        // ---- Check for batch_id in URL ----
+        function checkUrlForBatch() {
+            const params = new URLSearchParams(window.location.search);
+            const batchId = params.get('batch_id');
+            if (batchId) {
+                currentBatchId = batchId;
+                batchMode = true;
+                resultsSection.style.display = 'block';
+                showToast(`Connected to batch: ${batchId}`);
+                batchFileCounter.style.display = 'inline';
+                batchFileCounter.textContent = `📁 Batch ${batchId.substring(0, 8)}...`;
+                abortBatchBtn.style.display = 'inline-flex';
+                abortBatchBtn.onclick = () => {
+                    abortRequested = true;
+                    showToast('Abort requested...', false);
+                };
+                hasShownCurrentForCurrentFile = false;
+                isWaitingForNextFile = false;
+
+                if (pollingInterval) clearInterval(pollingInterval);
+                isPolling = false;
+                pollingInterval = setInterval(() => pollBatch(), 1500);
+                pollBatch();
+            }
+        }
+
         // ---- Init ----
-        loadRecordsFromServer();
+        loadRecords();
         updateCounter();
+        checkUrlForBatch();
     </script>
 </body>
 </html>
