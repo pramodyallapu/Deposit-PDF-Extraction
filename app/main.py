@@ -31,6 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List
 
+from app.core.summary_only import extract_summary_from_text_file
 from app.database import database
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Header, UploadFile
@@ -169,24 +170,93 @@ def extract_pages_from_text_file(file_path: str) -> list:
     }]
 
 
-def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
+def _extract_sync(file_path: str, filename: str):
     logger.info("Extracting file: %s", filename)
+    is_text = is_text_file(filename)
 
     pages = (
         extract_pages_from_text_file(file_path)
-        if is_text_file(filename)
+        if is_text
         else extract_pages_from_pdf(file_path)
     )
 
     if not pages:
         raise ValueError("No content could be extracted from this file.")
-    # for page in pages:
-    #     print("------------------------------------------")
-    #     print(f"Page {page['page_number']} (method: {page['method']}):")
-    #     print(page["text"] )
-    #     print("------------------------------------------")
-        
-    result = extract_eob_data_from_pages(pages)
+
+    for page in pages:
+        print("------------------------------------------")
+        print(f"Page {page['page_number']} (method: {page['method']}):")
+        print(page["text"])
+        print("------------------------------------------")
+
+    # TXT/TEXT: extract all summary records
+    if is_text:
+        summary_records = extract_summary_from_text_file(pages[0]["text"])
+
+        if summary_records:
+            total_amount = sum(
+                float(record["check_amount"].replace(",", ""))
+                for record in summary_records
+            )
+
+            payment_status = "pay" if total_amount > 0 else "no_pay"
+
+            responses = []
+
+            for summary in summary_records:
+                claim_count = int(summary.get("claim_count", 0) or 0)
+                response = ExtractionResponse(
+                    filename=filename,
+                    check_number=FieldResult(
+                        value=summary["check_number"],
+                        confidence=1.0,
+                        alias_used="summary",
+                    ),
+                    check_date=FieldResult(
+                        value=summary["check_date"],
+                        confidence=1.0,
+                        alias_used="summary",
+                    ),
+                    check_amount=FieldResult(
+                        value=summary["check_amount"],
+                        confidence=1.0,
+                        alias_used="summary",
+                    ),
+                    payment_status=payment_status,
+                    practice_name=FieldResult(
+                        value=summary.get("payee", ""),
+                        confidence=1.0,
+                        alias_used="summary",
+                    ),
+                    insurance_name=FieldResult(
+                        value="",
+                        confidence=0.0,
+                        alias_used=None,
+                    ),
+                    cpt_codes=CPTResult(
+                        cpt_codes=[],
+                        cpt_count=claim_count,
+                        cpt_total_occurrences=claim_count,
+                        extraction_confidence=1.0 if claim_count > 0 else 0.0,
+                        cpt_occurrences={},
+                    ),
+                    meta=ExtractionMeta(
+                        total_pages=len(pages),
+                        header_pages_searched=1,
+                        candidate_searched=[1],
+                    ),
+                )
+
+                responses.append(response)
+
+            return responses
+
+        # TXT/TEXT without summary -> existing extraction
+        result = extract_eob_data_from_pages(pages)
+    # PDF -> existing extraction unchanged
+    else:
+        result = extract_eob_data_from_pages(pages)
+
     meta = result.get("_meta", {})
 
     def field(name: str) -> FieldResult:
@@ -203,7 +273,7 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
         check_number=field("check_number"),
         check_date=field("check_date"),
         check_amount=field("check_amount"),
-        payment_status=result["payment_status"],
+        payment_status=result.get("payment_status", ""),
         practice_name=field("practice_name"),
         insurance_name=field("insurance_name"),
         cpt_codes=CPTResult(
@@ -216,10 +286,11 @@ def _extract_sync(file_path: str, filename: str) -> ExtractionResponse:
         meta=ExtractionMeta(
             total_pages=meta.get("total_pages", len(pages)),
             header_pages_searched=meta.get("header_pages_searched", 0),
-            candidate_searched=meta.get("candidate_page_numbers", 0),
+            candidate_searched=meta.get("candidate_page_numbers", []),
         ),
     )
-    print("Response : ",response)
+
+    print("Response: ", response)
     return response
 
 async def _save_upload_to_temp(upload: UploadFile) -> str:
@@ -237,7 +308,7 @@ async def _save_upload_to_temp(upload: UploadFile) -> str:
     return path
 
 
-@app.post("/api/extract", response_model=ExtractionResponse)
+@app.post("/api/extract")
 async def extract_single(file: UploadFile = File(...)):
 
     filename = file.filename or ""
@@ -252,12 +323,24 @@ async def extract_single(file: UploadFile = File(...)):
 
     try:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             EXECUTOR,
             _extract_sync,
             tmp_path,
             filename,
         )
+
+        if isinstance(result, list):
+            return {
+                "success": True,
+                "count": len(result),
+                "records": [
+                    item.model_dump() if hasattr(item, "model_dump") else item
+                    for item in result
+                ],
+            }
+
+        return result
     except Exception as exc:
         logger.exception("Manual extraction failed: %s", filename)
         raise HTTPException(

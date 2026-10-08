@@ -1068,13 +1068,12 @@
                     approveBtn.onclick = async function handler() {
                         approveBtn.disabled = true;
                         skipBtn.disabled = true;
-                        // Hide the results and show spinner while processing
+                        // Capture the approved values before clearing the ledger.
+                        const record = getCurrentRecordFromLedger();
                         resetLedger();
                         clearPreview();
                         showSpinner('Loading next file');
                         isWaitingForNextFile = true;
-
-                        const record = getCurrentRecordFromLedger();
                         try {
                             const res = await fetch(`/api/extract-batch/${currentBatchId}/approve`, {
                                 method: 'POST',
@@ -1136,9 +1135,79 @@
         }
 
         // ---------- Manual bulk processing ----------
+        function normalizeExtractionRecords(data) {
+            if (Array.isArray(data?.records)) return data.records;
+            if (Array.isArray(data)) return data;
+            return data ? [data] : [];
+        }
+
+        function populateLedger(record) {
+            record = record || {};
+            const cpt = record.cpt_codes || {};
+            const cptCodes = Array.isArray(cpt.cpt_codes) ? cpt.cpt_codes : [];
+            const cptConfidence = Number(cpt.extraction_confidence || 0);
+
+            setFieldWithConf('checkNumber', record.check_number?.value || '', Number(record.check_number?.confidence || 0));
+            setFieldWithConf('checkDate', record.check_date?.value || '', Number(record.check_date?.confidence || 0));
+            setFieldWithConf('checkAmount', record.check_amount?.value || '', Number(record.check_amount?.confidence || 0));
+            fields.paymentStatus.textContent = record.payment_status || '—';
+            fields.insuranceName.value = record.insurance_name?.value || '';
+            fields.practiceName.value = record.practice_name?.value || '';
+            fields.cptCodes.innerHTML = cptCodes.length > 0
+                ? cptCodes.map(c => `<span class="cpt-chip">${escapeHtml(String(c))}</span>`).join('')
+                : '<span class="no-stamp">None found</span>';
+            fields.cptCount.textContent = cpt.cpt_total_occurrences || 0;
+            confs.cptConf.textContent = `${(cptConfidence * 100).toFixed(1)}%`;
+            confs.cptConf.className = `stamp ${stampClass(cptConfidence)}`;
+
+            resultsSection.style.display = 'block';
+            requestAnimationFrame(() => {
+                autoGrowTextarea(fields.insuranceName);
+                autoGrowTextarea(fields.practiceName);
+            });
+        }
+
+        async function waitForManualApproval(buttonText = '✅ Approve') {
+            approveBtn.disabled = false;
+            approveBtn.textContent = buttonText;
+            skipBtn.style.display = 'inline-flex';
+            skipBtn.textContent = '⏭️ Skip';
+
+            return await new Promise((resolve) => {
+                approveBtn.onclick = () => {
+                    approveBtn.disabled = true;
+                    skipBtn.disabled = true;
+                    resolve('approve');
+                };
+                skipBtn.onclick = () => {
+                    approveBtn.disabled = true;
+                    skipBtn.disabled = true;
+                    resolve('skip');
+                };
+            });
+        }
+
+        async function saveManualLedgerRecord() {
+            const record = getCurrentRecordFromLedger();
+            const duplicate = submittedRecords.some(r =>
+                r.checkNumber === record.checkNumber &&
+                r.checkDate === record.checkDate &&
+                r.checkAmount === record.checkAmount
+            );
+
+            if (duplicate) {
+                showToast('Duplicate skipped.', false);
+                return false;
+            }
+
+            await submitRecord(record);
+            submittedRecords.push({ ...record });
+            updateCounter();
+            return true;
+        }
+
         async function startManualBatch(files) {
-            if (isProcessing) return;
-            if (files.length === 0) return;
+            if (isProcessing || files.length === 0) return;
 
             isProcessing = true;
             batchMode = false;
@@ -1150,39 +1219,50 @@
 
             let processedCount = 0;
             const total = files.length;
+
             for (let i = 0; i < total; i++) {
                 const item = files[i];
                 const file = item.file;
+                const isText = /\.(txt|text)$/i.test(file.name);
 
-                showSpinner(`Extracting ${file.name}…`, `File ${i+1}/${total}`);
-
+                showSpinner(`Extracting ${file.name}…`, `File ${i + 1}/${total}`);
                 item.status = 'extracting';
                 updateFileList();
 
-                const progress = Math.round(((i) / total) * 100);
                 batchProgressContainer.style.display = 'block';
-                batchProgressFill.style.width = `${progress}%`;
-                progressMsg.textContent = `Processing ${i+1}/${total}...`;
-
-                // Show filename
+                batchProgressFill.style.width = `${Math.round((i / total) * 100)}%`;
+                progressMsg.textContent = `Processing ${i + 1}/${total}...`;
                 currentFileNameText.textContent = file.name;
                 currentFileHeader.style.display = 'flex';
 
-                // Render preview
-                try {
-                    const reader = new FileReader();
-                    const pdfData = await new Promise((resolve, reject) => {
-                        reader.onload = (e) => resolve(e.target.result);
-                        reader.onerror = reject;
-                        reader.readAsArrayBuffer(file);
-                    });
-                    await renderPdfPage(pdfData, 1, 1.5);
-                } catch (err) {
-                    console.warn('Preview failed:', err);
+                if (isText) {
+                    try {
+                        const reader = new FileReader();
+                        const content = await new Promise((resolve, reject) => {
+                            reader.onload = e => resolve(e.target.result);
+                            reader.onerror = reject;
+                            reader.readAsText(file);
+                        });
+                        pdfContainer.innerHTML = `<pre style="white-space:pre-wrap;padding:16px;font-family:monospace;font-size:0.85rem;background:white;border-radius:4px;max-height:100%;overflow:auto;">${escapeHtml(String(content))}</pre>`;
+                        pageInfo.textContent = 'Text file (1 page)';
+                    } catch (err) {
+                        console.warn('Text preview failed:', err);
+                    }
+                } else {
+                    try {
+                        const reader = new FileReader();
+                        const pdfData = await new Promise((resolve, reject) => {
+                            reader.onload = e => resolve(e.target.result);
+                            reader.onerror = reject;
+                            reader.readAsArrayBuffer(file);
+                        });
+                        await renderPdfPage(pdfData, 1, 1.5);
+                    } catch (err) {
+                        console.warn('Preview failed:', err);
+                    }
                 }
 
-                // Extract
-                let data = null;
+                let data;
                 try {
                     data = await extractSingleFile(file);
                 } catch (err) {
@@ -1193,73 +1273,50 @@
                     continue;
                 }
 
-                // Populate ledger
-                const cpt = data.cpt_codes;
-                setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
-                setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
-                setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
-                fields.paymentStatus.textContent = data.payment_status || '—';
-                fields.insuranceName.value = data.insurance_name.value || '';
-                fields.practiceName.value = data.practice_name.value || '';
-                fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
-                    cpt.cpt_codes.map(c => `<span class="cpt-chip">${c}</span>`).join('') :
-                    '<span class="no-stamp">None found</span>';
-                fields.cptCount.textContent = cpt.cpt_total_occurrences;
-                const cptPct = cpt.extraction_confidence;
-                confs.cptConf.textContent = `${(cptPct * 100).toFixed(1)}%`;
-                confs.cptConf.className = `stamp ${stampClass(cptPct)}`;
-
-                resultsSection.style.display = 'block';
-
-                requestAnimationFrame(() => {
-                    autoGrowTextarea(fields.insuranceName);
-                    autoGrowTextarea(fields.practiceName);
-                });
-
-                hideSpinner();
-
-                // Wait for user approval
-                approveBtn.disabled = false;
-                approveBtn.textContent = '✅ Approve & Next';
-                skipBtn.style.display = 'inline-flex';
-                skipBtn.textContent = '⏭️ Skip';
-
-                waitingForApproval = true;
-
-                const action = await new Promise((resolve) => {
-                    const onApprove = () => {
-                        approveBtn.disabled = true;
-                        resolve('approve');
-                    };
-                    const onSkip = () => {
-                        approveBtn.disabled = true;
-                        resolve('skip');
-                    };
-                    approveBtn.onclick = onApprove;
-                    skipBtn.onclick = onSkip;
-                });
-
-                waitingForApproval = false;
-
-                if (action === 'approve') {
-                    showSpinner('Saving record…', 'Submitting to database');
-                    const record = getCurrentRecordFromLedger();
-                    try {
-                        await submitRecord(record);
-                        submittedRecords.push({ ...record });
-                        updateCounter();
-                        showToast(`✅ Record added.`);
-                        item.status = 'approved';
-                    } catch (err) {
-                        showToast(`Submission failed: ${err.message}`, false);
-                        item.status = 'failed';
-                    }
+                const records = normalizeExtractionRecords(data);
+                if (records.length === 0) {
                     hideSpinner();
-                } else {
-                    showToast(`⏭️ Skipped: ${file.name}`, false);
-                    item.status = 'skipped';
+                    showToast(`No extraction result: ${file.name}`, false);
+                    item.status = 'failed';
+                    updateFileList();
+                    continue;
                 }
 
+                let fileFailed = false;
+                for (let r = 0; r < records.length; r++) {
+                    resetLedger();
+                    currentFileNameText.textContent = records.length > 1
+                        ? `${file.name} — Record ${r + 1}/${records.length}`
+                        : file.name;
+                    currentFileHeader.style.display = 'flex';
+                    populateLedger(records[r]);
+                    hideSpinner();
+
+                    const action = await waitForManualApproval(
+                        records.length > 1 ? `✅ Approve Record ${r + 1}` : '✅ Approve & Next'
+                    );
+
+                    if (action === 'approve') {
+                        showSpinner('Saving record…', 'Submitting to database');
+                        try {
+                            const saved = await saveManualLedgerRecord();
+                            if (saved) showToast('✅ Record added.');
+                        } catch (err) {
+                            showToast(`Submission failed: ${err.message}`, false);
+                            fileFailed = true;
+                        }
+                        hideSpinner();
+                    } else {
+                        showToast(`⏭️ Skipped: ${file.name}`, false);
+                    }
+
+                    resetLedger();
+                    if (r < records.length - 1) {
+                        showSpinner(`Preparing next record…`, `Record ${r + 2}/${records.length}`);
+                    }
+                }
+
+                item.status = fileFailed ? 'failed' : 'approved';
                 processedCount++;
                 updateFileList();
                 resetLedger();
@@ -1358,89 +1415,70 @@
             clearPreview();
             hideError();
             uploadStatus.textContent = `Selected: ${file.name}`;
-
-            // Show filename
             currentFileNameText.textContent = file.name;
             currentFileHeader.style.display = 'flex';
 
-            const isText = file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.text');
-            if (isText) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const content = e.target.result;
-                    pdfContainer.innerHTML = `<pre style="white-space:pre-wrap;padding:16px;font-family:monospace;font-size:0.85rem;background:white;border-radius:4px;max-height:100%;overflow:auto;">${escapeHtml(content)}</pre>`;
-                    pageInfo.textContent = 'Text file (1 page)';
-                };
-                reader.readAsText(file);
-            } else {
-                const reader = new FileReader();
-                reader.onload = async function(e) {
-                    const pdfData = e.target.result;
-                    await renderPdfPage(pdfData, 1, 1.5);
-                };
-                reader.readAsArrayBuffer(file);
-            }
-
-            showSpinner(`Extracting ${file.name}…`, 'This may take a moment');
+            const isText = /\.(txt|text)$/i.test(file.name);
             try {
+                if (isText) {
+                    const reader = new FileReader();
+                    const content = await new Promise((resolve, reject) => {
+                        reader.onload = e => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsText(file);
+                    });
+                    pdfContainer.innerHTML = `<pre style="white-space:pre-wrap;padding:16px;font-family:monospace;font-size:0.85rem;background:white;border-radius:4px;max-height:100%;overflow:auto;">${escapeHtml(String(content))}</pre>`;
+                    pageInfo.textContent = 'Text file (1 page)';
+                } else {
+                    const reader = new FileReader();
+                    const pdfData = await new Promise((resolve, reject) => {
+                        reader.onload = e => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                    await renderPdfPage(pdfData, 1, 1.5);
+                }
+
+                showSpinner(`Extracting ${file.name}…`, 'This may take a moment');
                 const data = await extractSingleFile(file);
+                const records = normalizeExtractionRecords(data);
 
-                const cpt = data.cpt_codes;
-                setFieldWithConf('checkNumber', data.check_number.value, data.check_number.confidence);
-                setFieldWithConf('checkDate', data.check_date.value, data.check_date.confidence);
-                setFieldWithConf('checkAmount', data.check_amount.value, data.check_amount.confidence);
-                fields.paymentStatus.textContent = data.payment_status || '—';
-                fields.insuranceName.value = data.insurance_name.value || '';
-                fields.practiceName.value = data.practice_name.value || '';
-                fields.cptCodes.innerHTML = cpt.cpt_codes.length > 0 ?
-                    cpt.cpt_codes.map(c => `<span class="cpt-chip">${c}</span>`).join('') :
-                    '<span class="no-stamp">None found</span>';
-                fields.cptCount.textContent = cpt.cpt_total_occurrences;
-                const cptPct = cpt.extraction_confidence;
-                confs.cptConf.textContent = `${(cptPct * 100).toFixed(1)}%`;
-                confs.cptConf.className = `stamp ${stampClass(cptPct)}`;
+                if (records.length === 0) {
+                    throw new Error('No extraction result returned.');
+                }
 
-                resultsSection.style.display = 'block';
+                for (let i = 0; i < records.length; i++) {
+                    resetLedger();
+                    currentFileNameText.textContent = records.length > 1
+                        ? `${file.name} — Record ${i + 1}/${records.length}`
+                        : file.name;
+                    currentFileHeader.style.display = 'flex';
+                    populateLedger(records[i]);
+                    hideSpinner();
 
-                requestAnimationFrame(() => {
-                    autoGrowTextarea(fields.insuranceName);
-                    autoGrowTextarea(fields.practiceName);
-                });
-
-                hideSpinner();
-
-                approveBtn.textContent = '✅ Approve';
-                approveBtn.disabled = false;
-                skipBtn.style.display = 'none';
-                abortBatchBtn.style.display = 'none';
-                approveBtn.onclick = async function() {
-                    const record = getCurrentRecordFromLedger();
-                    const duplicate = submittedRecords.some(r =>
-                        r.checkNumber === record.checkNumber &&
-                        r.checkDate === record.checkDate &&
-                        r.checkAmount === record.checkAmount
+                    const action = await waitForManualApproval(
+                        records.length > 1 ? `✅ Approve Record ${i + 1}` : '✅ Approve'
                     );
-                    if (duplicate) {
-                        showToast('Duplicate skipped.', false);
-                        resetLedger();
-                        clearPreview();
-                        return;
-                    }
-                    showSpinner('Saving record…', 'Submitting to database');
-                    try {
-                        await submitRecord(record);
-                        submittedRecords.push({ ...record });
-                        updateCounter();
-                        showToast(`✅ Record #${submittedRecords.length} added.`);
+
+                    if (action === 'approve') {
+                        showSpinner('Saving record…', 'Submitting to database');
+                        try {
+                            const saved = await saveManualLedgerRecord();
+                            if (saved) showToast(`✅ Record ${i + 1} added.`);
+                        } catch (err) {
+                            hideSpinner();
+                            showToast(`Failed: ${err.message}`, false);
+                            break;
+                        }
                         hideSpinner();
-                        resetLedger();
-                        clearPreview();
-                        uploadStatus.textContent = '';
-                    } catch (err) {
-                        hideSpinner();
-                        showToast(`Failed: ${err.message}`, false);
+                    } else {
+                        showToast(`⏭️ Skipped record ${i + 1}.`, false);
                     }
-                };
+                }
+
+                resetLedger();
+                clearPreview();
+                uploadStatus.textContent = '';
             } catch (err) {
                 hideSpinner();
                 showError(`Extraction failed: ${err.message}`);
