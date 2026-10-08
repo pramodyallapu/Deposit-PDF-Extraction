@@ -1,5 +1,5 @@
 """Pydantic response schemas for the extraction API."""
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 
@@ -28,6 +28,7 @@ class ExtractionResponse(BaseModel):
     check_number: FieldResult
     check_date: FieldResult
     check_amount: FieldResult
+    payment_status: Literal["pay", "no_pay"]
     practice_name: FieldResult
     insurance_name: FieldResult
     cpt_codes: CPTResult
@@ -55,3 +56,6 @@ class PayerEntry(BaseModel):
 
 class PayersPayload(BaseModel):
     payers: list[PayerEntry]
+
+class BatchExtractionRequest(BaseModel):
+    batch_id: str

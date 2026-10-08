@@ -111,7 +111,7 @@
       gap: 32px;
       flex-wrap: wrap;
     }
-    .payer-list {
+    .entity-list {
       flex: 1 1 300px;
       min-width: 220px;
       background: var(--card);
@@ -123,7 +123,7 @@
       display: flex;
       flex-direction: column;
     }
-    .payer-list .list-header {
+    .entity-list .list-header {
       font-weight: 600;
       color: var(--ink-soft);
       border-bottom: 1px solid var(--line);
@@ -133,11 +133,11 @@
       justify-content: space-between;
       align-items: center;
     }
-    .payer-list .list-items {
+    .entity-list .list-items {
       flex: 1;
       overflow-y: auto;
     }
-    .payer-list .list-item {
+    .entity-list .list-item {
       padding: 8px 10px;
       border-radius: 6px;
       cursor: pointer;
@@ -147,31 +147,31 @@
       transition: background 0.1s;
       margin-bottom: 2px;
     }
-    .payer-list .list-item:hover {
+    .entity-list .list-item:hover {
       background: var(--accent-tint);
     }
-    .payer-list .list-item.active {
+    .entity-list .list-item.active {
       background: var(--accent);
       color: white;
     }
-    .payer-list .list-item .badge-aliases {
+    .entity-list .list-item .badge-aliases {
       font-size: 0.7rem;
       background: var(--paper-deep);
       padding: 2px 8px;
       border-radius: 999px;
       color: var(--ink-soft);
     }
-    .payer-list .list-item.active .badge-aliases {
+    .entity-list .list-item.active .badge-aliases {
       background: rgba(255,255,255,0.2);
       color: white;
     }
-    .payer-list .list-footer {
+    .entity-list .list-footer {
       margin-top: 12px;
       border-top: 1px solid var(--line);
       padding-top: 12px;
     }
 
-    .payer-form {
+    .entity-form {
       flex: 2 1 400px;
       background: var(--card);
       border: 1px solid var(--line);
@@ -179,21 +179,21 @@
       padding: 20px;
       display: none;
     }
-    .payer-form.visible {
+    .entity-form.visible {
       display: block;
     }
-    .payer-form .form-group {
+    .entity-form .form-group {
       margin-bottom: 16px;
     }
-    .payer-form label {
+    .entity-form label {
       display: block;
       font-weight: 600;
       font-size: 0.85rem;
       color: var(--ink-soft);
       margin-bottom: 4px;
     }
-    .payer-form input[type="text"],
-    .payer-form textarea {
+    .entity-form input[type="text"],
+    .entity-form textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -201,13 +201,13 @@
       font: inherit;
       background: white;
     }
-    .payer-form textarea {
+    .entity-form textarea {
       min-height: 80px;
       resize: vertical;
       font-family: 'IBM Plex Mono', monospace;
       font-size: 0.9rem;
     }
-    .payer-form .form-actions {
+    .entity-form .form-actions {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
@@ -237,6 +237,62 @@
     .btn-outline:hover { background: var(--paper-deep); }
     .btn-success { background: var(--amber); color: white; border-color: var(--amber); }
     .btn-success:hover { background: #8f6624; }
+    .btn:disabled { cursor: wait; opacity: 0.7; transform: none; }
+    .btn-loader {
+      width: 0.9rem; height: 0.9rem; border: 2px solid currentColor;
+      border-right-color: transparent; border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 4px;
+    }
+    .tab {
+      padding: 8px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+      border: none;
+      background: transparent;
+      color: var(--ink-soft);
+      transition: all 0.15s;
+    }
+    .tab:hover { background: var(--paper-deep); }
+    .tab.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .bulk-import-area {
+      margin-top: 16px;
+      padding: 16px;
+      background: var(--paper-deep);
+      border-radius: var(--radius);
+      border: 1px dashed var(--line);
+    }
+    .bulk-import-area textarea {
+      width: 100%;
+      min-height: 120px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 12px;
+      background: white;
+    }
+    .bulk-import-area .bulk-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
 
     .status-msg {
       margin-top: 12px;
@@ -244,6 +300,7 @@
       color: var(--ink-soft);
     }
     .status-msg.error { color: var(--rose); }
+    .status-msg.success { color: var(--accent); }
 
     .mode-indicator {
       font-size: 0.75rem;
@@ -262,7 +319,7 @@
       .app-header .tagline { display: none; }
       .main-content { padding: 16px; }
       .admin-layout { flex-direction: column; }
-      .payer-list { max-height: 250px; }
+      .entity-list { max-height: 250px; }
     }
   </style>
 </head>
@@ -271,7 +328,7 @@
   <header class="app-header">
     <div class="stamp-mark">EOB</div>
     <h1>Admin</h1>
-    <span class="tagline">Insurance alias management</span>
+    <span class="tagline">Manage payors and practices</span>
   </header>
   <div class="app-body">
     <aside class="sidebar">
@@ -282,87 +339,173 @@
     </aside>
     <main class="main-content">
       <h2 style="font-family:'Roboto Slab',serif; font-weight:700; font-size:1.4rem; margin-bottom:20px;">
-        Payer Aliases
+        Entity Management
         <span id="modeIndicator" class="mode-indicator"></span>
       </h2>
 
-      <div class="admin-layout">
-        <!-- Left: payer list + New Payer button -->
-        <div class="payer-list" id="payerList">
+      <div class="tabs">
+        <button class="tab active" data-tab="payors" onclick="switchTab('payors')">
+          <i class="bi bi-building"></i> Payors
+        </button>
+        <button class="tab" data-tab="practices" onclick="switchTab('practices')">
+          <i class="bi bi-hospital"></i> Practices
+        </button>
+      </div>
+
+      <div id="payorsPanel" class="admin-layout">
+        <div class="entity-list" id="payorList">
           <div class="list-header">
-            <span>Insurance Names</span>
-            <span style="font-weight:400; font-size:0.75rem; color:var(--muted);" id="payerCount">0</span>
+            <span>Insurance Payors</span>
+            <span style="font-weight:400; font-size:0.75rem; color:var(--muted);" id="payorCount">0</span>
           </div>
-          <div class="list-items" id="payerItems"></div>
+          <div class="list-items" id="payorItems"></div>
           <div class="list-footer">
-            <button class="btn btn-success" id="addBtn" style="width:100%; justify-content:center;">
-              <i class="bi bi-plus-circle"></i> New Payer
+            <button class="btn btn-success" id="addPayorBtn" style="width:100%; justify-content:center;">
+              <i class="bi bi-plus-circle"></i> New Payor
             </button>
           </div>
         </div>
 
-        <!-- Right: edit form -->
-        <div class="payer-form" id="payerForm">
+        <div class="entity-form" id="payorForm">
           <div class="form-group">
-            <label for="insuranceNameInput">Insurance Name (canonical)</label>
-            <input type="text" id="insuranceNameInput" placeholder="e.g. Aetna" />
+            <label for="payorNameInput">Payor Name (canonical)</label>
+            <input type="text" id="payorNameInput" placeholder="e.g. Aetna" />
           </div>
           <div class="form-group">
-            <label for="aliasesInput">Possible Names (aliases, comma separated)</label>
-            <textarea id="aliasesInput" placeholder="aetna, aetna better health, ..."></textarea>
+            <label for="payorAliasesInput">Possible Names (aliases, comma separated)</label>
+            <textarea id="payorAliasesInput" placeholder="aetna, aetna better health, ..."></textarea>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary" id="updateBtn"><i class="bi bi-pencil"></i> Update</button>
-            <button class="btn btn-danger" id="deleteBtn"><i class="bi bi-trash3"></i> Delete</button>
-            <button class="btn btn-outline" id="cancelBtn" style="display:none;"><i class="bi bi-x-circle"></i> Cancel</button>
-            <button class="btn btn-outline" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+            <button class="btn btn-primary" id="updatePayorBtn"><i class="bi bi-pencil"></i> Update</button>
+            <button class="btn btn-danger" id="deletePayorBtn"><i class="bi bi-trash3"></i> Delete</button>
+            <button class="btn btn-outline" id="cancelPayorBtn" style="display:none;"><i class="bi bi-x-circle"></i> Cancel</button>
           </div>
-          <div id="statusMsg" class="status-msg"></div>
+          <div id="payorStatus" class="status-msg"></div>
         </div>
+      </div>
+
+      <div id="practicesPanel" class="admin-layout" style="display:none;">
+        <div class="entity-list" id="practiceList">
+          <div class="list-header">
+            <span>Practices</span>
+            <span style="font-weight:400; font-size:0.75rem; color:var(--muted);" id="practiceCount">0</span>
+          </div>
+          <div class="list-items" id="practiceItems"></div>
+          <div class="list-footer">
+            <button class="btn btn-success" id="addPracticeBtn" style="width:100%; justify-content:center;">
+              <i class="bi bi-plus-circle"></i> New Practice
+            </button>
+          </div>
+        </div>
+
+        <div class="entity-form" id="practiceForm">
+          <div class="form-group">
+            <label for="practiceNameInput">Practice Name (canonical)</label>
+            <input type="text" id="practiceNameInput" placeholder="e.g. ABC Medical Group" />
+          </div>
+          <div class="form-group">
+            <label for="practiceAliasesInput">Possible Names (aliases, comma separated)</label>
+            <textarea id="practiceAliasesInput" placeholder="abc medical, abc med group, ..."></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="updatePracticeBtn"><i class="bi bi-pencil"></i> Update</button>
+            <button class="btn btn-danger" id="deletePracticeBtn"><i class="bi bi-trash3"></i> Delete</button>
+            <button class="btn btn-outline" id="cancelPracticeBtn" style="display:none;"><i class="bi bi-x-circle"></i> Cancel</button>
+          </div>
+          <div id="practiceStatus" class="status-msg"></div>
+        </div>
+      </div>
+
+      <!-- Bulk Import Section -->
+      <div class="bulk-import-area" style="margin-top:20px;">
+        <h4 style="font-size:0.95rem; font-weight:600; margin-bottom:8px;">
+          <i class="bi bi-upload"></i> Bulk Import
+        </h4>
+        <p style="font-size:0.8rem; color:var(--muted); margin-bottom:8px;">
+          Upload a CSV or Excel file with columns <code>names</code> and <code>possible names</code>.
+        </p>
+        <div class="bulk-actions" style="margin-bottom:8px;">
+          <label for="bulkEntitySelect" style="font-size:0.8rem; color:var(--ink-soft); align-self:center;">Import as</label>
+          <select id="bulkEntitySelect" class="btn" aria-label="Import entity type">
+            <option value="payors">Payor</option>
+            <option value="practices">Practice</option>
+          </select>
+          <input type="file" id="bulkEntityFile" accept=".csv,.xlsx,.xlsm" hidden>
+          <button class="btn btn-primary" id="chooseEntityFileBtn" type="button">
+            <i class="bi bi-file-earmark-spreadsheet"></i> Upload File
+          </button>
+          <button class="btn btn-success" id="submitEntityFileBtn" type="button">
+            <i class="bi bi-check2-circle"></i> Submit
+          </button>
+        </div>
+        <div id="selectedFileStatus" style="font-size:0.8rem; color:var(--muted); margin-bottom:8px;">No file selected.</div>
+        <div class="bulk-actions">
+          <button class="btn btn-outline" id="refreshBtn">
+            <i class="bi bi-arrow-clockwise"></i> Refresh All
+          </button>
+        </div>
+        <div id="bulkStatus" class="status-msg"></div>
       </div>
     </main>
   </div>
 </div>
 
 <script>
-  // ---------- state ----------
-  let payers = [];
-  let selectedIndex = -1;
-  let isNew = false;
-  let originalName = '';
+  // ============ State ============
+  let payors = [];
+  let practices = [];
+  let selectedPayorIndex = -1;
+  let selectedPracticeIndex = -1;
+  let isNewPayor = false;
+  let isNewPractice = false;
+  let originalPayorName = '';
+  let originalPracticeName = '';
+  let currentTab = 'payors';
 
-  // DOM refs
-  const payerItems = document.getElementById('payerItems');
-  const payerCount = document.getElementById('payerCount');
-  const payerForm = document.getElementById('payerForm');
-  const insuranceNameInput = document.getElementById('insuranceNameInput');
-  const aliasesInput = document.getElementById('aliasesInput');
-  const statusMsg = document.getElementById('statusMsg');
-  const modeIndicator = document.getElementById('modeIndicator');
+  // ============ DOM Refs ============
+  const payorItems = document.getElementById('payorItems');
+  const payorCount = document.getElementById('payorCount');
+  const payorForm = document.getElementById('payorForm');
+  const payorNameInput = document.getElementById('payorNameInput');
+  const payorAliasesInput = document.getElementById('payorAliasesInput');
+  const payorStatus = document.getElementById('payorStatus');
 
-  const updateBtn = document.getElementById('updateBtn');
-  const deleteBtn = document.getElementById('deleteBtn');
-  const addBtn = document.getElementById('addBtn');
-  const cancelBtn = document.getElementById('cancelBtn');
-  const refreshBtn = document.getElementById('refreshBtn');
+  const practiceItems = document.getElementById('practiceItems');
+  const practiceCount = document.getElementById('practiceCount');
+  const practiceForm = document.getElementById('practiceForm');
+  const practiceNameInput = document.getElementById('practiceNameInput');
+  const practiceAliasesInput = document.getElementById('practiceAliasesInput');
+  const practiceStatus = document.getElementById('practiceStatus');
 
-  // ---------- helpers ----------
-  function setStatus(msg, isError = false) {
-    statusMsg.textContent = msg;
-    statusMsg.className = 'status-msg' + (isError ? ' error' : '');
+  const bulkStatus = document.getElementById('bulkStatus');
+  const bulkEntitySelect = document.getElementById('bulkEntitySelect');
+  const bulkEntityFile = document.getElementById('bulkEntityFile');
+  const chooseEntityFileBtn = document.getElementById('chooseEntityFileBtn');
+  const submitEntityFileBtn = document.getElementById('submitEntityFileBtn');
+  const selectedFileStatus = document.getElementById('selectedFileStatus');
+
+  // ============ Utility Functions ============
+  function setStatus(element, msg, isError = false) {
+    element.textContent = msg;
+    element.className = 'status-msg' + (isError ? ' error' : ' success');
   }
 
-  function showForm(show) {
-    payerForm.classList.toggle('visible', show);
+  // ============ Tab Switching ============
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+    document.getElementById('payorsPanel').style.display = tab === 'payors' ? 'flex' : 'none';
+    document.getElementById('practicesPanel').style.display = tab === 'practices' ? 'flex' : 'none';
   }
 
-  function renderList() {
+  // ============ Payor Functions ============
+  function renderPayors() {
     let html = '';
-    if (payers.length === 0) {
-      html = `<div style="color:var(--muted); text-align:center; padding:20px 0;">No payers defined</div>`;
+    if (payors.length === 0) {
+      html = `<div style="color:var(--muted); text-align:center; padding:20px 0;">No payors defined</div>`;
     } else {
-      payers.forEach((p, idx) => {
-        const active = (!isNew && idx === selectedIndex) ? 'active' : '';
+      payors.forEach((p, idx) => {
+        const active = (!isNewPayor && idx === selectedPayorIndex) ? 'active' : '';
         const aliasCount = p.aliases ? p.aliases.length : 0;
         html += `
           <div class="list-item ${active}" data-index="${idx}">
@@ -372,264 +515,512 @@
         `;
       });
     }
-    payerItems.innerHTML = html;
-    payerCount.textContent = payers.length;
+    payorItems.innerHTML = html;
+    payorCount.textContent = payors.length;
 
-    document.querySelectorAll('.list-item').forEach(el => {
+    document.querySelectorAll('#payorItems .list-item').forEach(el => {
       el.addEventListener('click', () => {
         const idx = parseInt(el.dataset.index, 10);
-        if (isNew) {
-          if (!confirm('You have unsaved changes. Discard and select existing payer?')) return;
-          cancelNewPayer();
+        if (isNewPayor) {
+          if (!confirm('You have unsaved changes. Discard and select existing payor?')) return;
+          cancelNewPayor();
         }
-        selectPayer(idx);
+        selectPayor(idx);
       });
     });
   }
 
-  function selectPayer(idx) {
-    if (idx < 0 || idx >= payers.length) {
-      selectedIndex = -1;
-      originalName = '';
-      insuranceNameInput.value = '';
-      aliasesInput.value = '';
-      isNew = false;
-      updateModeIndicator();
-      showForm(false);
-      renderList();
+  function selectPayor(idx) {
+    if (idx < 0 || idx >= payors.length) {
+      selectedPayorIndex = -1;
+      originalPayorName = '';
+      payorNameInput.value = '';
+      payorAliasesInput.value = '';
+      isNewPayor = false;
+      payorForm.classList.remove('visible');
+      renderPayors();
       return;
     }
-    selectedIndex = idx;
-    const p = payers[idx];
-    originalName = p.name;
-    insuranceNameInput.value = p.name || '';
-    aliasesInput.value = (p.aliases || []).join(', ');
-    isNew = false;
-    showForm(true);
-    updateModeIndicator();
-    renderList();
-    setStatus(`Editing "${p.name}"`);
+    selectedPayorIndex = idx;
+    const p = payors[idx];
+    originalPayorName = p.name;
+    payorNameInput.value = p.name || '';
+    payorAliasesInput.value = (p.aliases || []).join(', ');
+    isNewPayor = false;
+    payorForm.classList.add('visible');
+    document.getElementById('cancelPayorBtn').style.display = 'none';
+    document.getElementById('updatePayorBtn').innerHTML = '<i class="bi bi-pencil"></i> Update';
+    document.getElementById('deletePayorBtn').disabled = false;
+    document.getElementById('addPayorBtn').style.display = 'flex';
+    renderPayors();
+    setStatus(payorStatus, `Editing "${p.name}"`);
   }
 
-  function loadPayerIntoForm(idx) {
-    if (idx < 0 || idx >= payers.length) {
-      insuranceNameInput.value = '';
-      aliasesInput.value = '';
-      originalName = '';
-      showForm(false);
-      return;
-    }
-    const p = payers[idx];
-    originalName = p.name;
-    insuranceNameInput.value = p.name || '';
-    aliasesInput.value = (p.aliases || []).join(', ');
-    showForm(true);
-  }
-
-  function updateModeIndicator() {
-    if (isNew) {
-      modeIndicator.textContent = '(new)';
-      modeIndicator.className = 'mode-indicator new';
-      cancelBtn.style.display = 'inline-flex';
-      updateBtn.innerHTML = '<i class="bi bi-plus-circle"></i> Create';
-      deleteBtn.disabled = true;
-      addBtn.style.display = 'none';          // ← hide "New Payer" button
+  function cancelNewPayor() {
+    isNewPayor = false;
+    if (selectedPayorIndex >= 0 && selectedPayorIndex < payors.length) {
+      const p = payors[selectedPayorIndex];
+      payorNameInput.value = p.name || '';
+      payorAliasesInput.value = (p.aliases || []).join(', ');
+      payorForm.classList.add('visible');
     } else {
-      modeIndicator.textContent = '';
-      modeIndicator.className = 'mode-indicator';
-      cancelBtn.style.display = 'none';
-      updateBtn.innerHTML = '<i class="bi bi-pencil"></i> Update';
-      deleteBtn.disabled = false;
-      addBtn.style.display = 'flex';          // ← show "New Payer" button
+      payorNameInput.value = '';
+      payorAliasesInput.value = '';
+      payorForm.classList.remove('visible');
     }
+    document.getElementById('cancelPayorBtn').style.display = 'none';
+    document.getElementById('updatePayorBtn').innerHTML = '<i class="bi bi-pencil"></i> Update';
+    document.getElementById('deletePayorBtn').disabled = false;
+    document.getElementById('addPayorBtn').style.display = 'flex';
+    renderPayors();
+    setStatus(payorStatus, 'Cancelled new payor.');
   }
 
-  function cancelNewPayer() {
-    isNew = false;
-    if (selectedIndex >= 0 && selectedIndex < payers.length) {
-      loadPayerIntoForm(selectedIndex);
-      showForm(true);
-    } else {
-      insuranceNameInput.value = '';
-      aliasesInput.value = '';
-      showForm(false);
-    }
-    updateModeIndicator();
-    renderList();
-    setStatus('Cancelled new payer.');
-  }
-
-  // ---------- server API ----------
-  async function loadPayersFromServer() {
+  async function loadPayors() {
     try {
-      const res = await fetch('/api/admin/payers');
-      if (!res.ok) throw new Error('Failed to fetch payers');
+      const res = await fetch('/api/admin/payors');
+      if (!res.ok) throw new Error('Failed to fetch payors');
       const data = await res.json();
-      payers = data.payers || [];
-      payers = payers.map(p => ({ name: p.name || '', aliases: p.aliases || [] }));
-      payers.sort((a, b) => a.name.localeCompare(b.name));
-
-      // Clear selection – no auto-select
-      selectedIndex = -1;
-      originalName = '';
-      insuranceNameInput.value = '';
-      aliasesInput.value = '';
-      isNew = false;
-      showForm(false);
-      updateModeIndicator();
-      renderList();
-      setStatus(`Loaded ${payers.length} payers.`);
+      payors = data.payors || [];
+      payors.sort((a, b) => a.name.localeCompare(b.name));
+      selectedPayorIndex = -1;
+      originalPayorName = '';
+      payorNameInput.value = '';
+      payorAliasesInput.value = '';
+      isNewPayor = false;
+      payorForm.classList.remove('visible');
+      renderPayors();
     } catch (err) {
-      setStatus('Error loading payers: ' + err.message, true);
+      setStatus(payorStatus, 'Error loading payors: ' + err.message, true);
     }
   }
 
-  async function createPayer(name, aliases) {
-    const res = await fetch('/api/admin/payer', {
+  async function createPayor(name, aliases) {
+    const res = await fetch('/api/admin/payor', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, aliases }),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Failed to create payer');
+      throw new Error(err.detail || 'Failed to create payor');
     }
     return await res.json();
   }
 
-  async function updatePayer(name, aliases) {
-    const res = await fetch(`/api/admin/payer/${encodeURIComponent(name)}`, {
+  async function updatePayor(name, aliases) {
+    const res = await fetch(`/api/admin/payor/${encodeURIComponent(name)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ aliases }),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Failed to update payer');
+      throw new Error(err.detail || 'Failed to update payor');
     }
     return await res.json();
   }
 
-  async function deletePayer(name) {
-    const res = await fetch(`/api/admin/payer/${encodeURIComponent(name)}`, {
+  async function deletePayor(name) {
+    const res = await fetch(`/api/admin/payor/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Failed to delete payer');
+      throw new Error(err.detail || 'Failed to delete payor');
     }
     return await res.json();
   }
 
-  // ---------- UI actions ----------
-  async function saveCurrentPayer() {
-    const name = insuranceNameInput.value.trim();
+  async function savePayor() {
+    const name = payorNameInput.value.trim();
     if (!name) {
-      setStatus('Insurance name cannot be empty.', true);
+      setStatus(payorStatus, 'Payor name cannot be empty.', true);
       return;
     }
-    const aliases = aliasesInput.value.split(',').map(s => s.trim()).filter(Boolean);
+    const aliases = payorAliasesInput.value.split(',').map(s => s.trim()).filter(Boolean);
 
-    const duplicate = payers.some((p, idx) => {
-      if (isNew) return p.name.toLowerCase() === name.toLowerCase();
-      return idx !== selectedIndex && p.name.toLowerCase() === name.toLowerCase();
+    const duplicate = payors.some((p, idx) => {
+      if (isNewPayor) return p.name.toLowerCase() === name.toLowerCase();
+      return idx !== selectedPayorIndex && p.name.toLowerCase() === name.toLowerCase();
     });
     if (duplicate) {
-      setStatus(`A payer with name "${name}" already exists.`, true);
+      setStatus(payorStatus, `A payor with name "${name}" already exists.`, true);
       return;
     }
 
     try {
-      if (isNew) {
-        await createPayer(name, aliases);
-        setStatus(`Created "${name}".`);
-        isNew = false;
-        await loadPayersFromServer();
-        // Auto-select the newly created payer
-        const newIdx = payers.findIndex(p => p.name === name);
+      if (isNewPayor) {
+        await createPayor(name, aliases);
+        setStatus(payorStatus, `Created "${name}".`);
+        await loadPayors();
+        const newIdx = payors.findIndex(p => p.name === name);
         if (newIdx >= 0) {
-          selectedIndex = newIdx;
-          loadPayerIntoForm(newIdx);
-          showForm(true);
-          renderList();
-          updateModeIndicator();
+          selectedPayorIndex = newIdx;
+          selectPayor(newIdx);
         }
       } else {
-        const oldName = originalName;
+        const oldName = originalPayorName;
         if (oldName.toLowerCase() !== name.toLowerCase()) {
-          await deletePayer(oldName);
-          await createPayer(name, aliases);
-          setStatus(`Renamed "${oldName}" → "${name}".`);
+          await deletePayor(oldName);
+          await createPayor(name, aliases);
+          setStatus(payorStatus, `Renamed "${oldName}" → "${name}".`);
         } else {
-          await updatePayer(oldName, aliases);
-          setStatus(`Updated "${name}".`);
+          await updatePayor(oldName, aliases);
+          setStatus(payorStatus, `Updated "${name}".`);
         }
-        await loadPayersFromServer();
-        const newIdx = payers.findIndex(p => p.name === name);
+        await loadPayors();
+        const newIdx = payors.findIndex(p => p.name === name);
         if (newIdx >= 0) {
-          selectedIndex = newIdx;
-          loadPayerIntoForm(newIdx);
-          showForm(true);
-          renderList();
-          updateModeIndicator();
+          selectedPayorIndex = newIdx;
+          selectPayor(newIdx);
         }
       }
     } catch (err) {
-      setStatus('Error: ' + err.message, true);
+      setStatus(payorStatus, 'Error: ' + err.message, true);
     }
   }
 
-  async function deleteCurrentPayer() {
-    if (isNew) {
-      setStatus('Cannot delete a new payer that is not saved yet.', true);
+  async function deleteCurrentPayor() {
+    if (isNewPayor) {
+      setStatus(payorStatus, 'Cannot delete a new payor that is not saved yet.', true);
       return;
     }
-    if (selectedIndex < 0 || selectedIndex >= payers.length) {
-      setStatus('No payer selected.', true);
+    if (selectedPayorIndex < 0 || selectedPayorIndex >= payors.length) {
+      setStatus(payorStatus, 'No payor selected.', true);
       return;
     }
-    const name = payers[selectedIndex].name || '(unnamed)';
-    if (!confirm(`Delete payer "${name}"?`)) return;
+    const name = payors[selectedPayorIndex].name || '(unnamed)';
+    if (!confirm(`Delete payor "${name}"?`)) return;
     try {
-      await deletePayer(name);
-      setStatus(`Deleted "${name}".`);
-      await loadPayersFromServer();
-      // After deletion, clear selection and hide form
-      selectedIndex = -1;
-      originalName = '';
-      insuranceNameInput.value = '';
-      aliasesInput.value = '';
-      isNew = false;
-      showForm(false);
-      updateModeIndicator();
-      renderList();
+      await deletePayor(name);
+      setStatus(payorStatus, `Deleted "${name}".`);
+      await loadPayors();
+      selectedPayorIndex = -1;
+      originalPayorName = '';
+      payorNameInput.value = '';
+      payorAliasesInput.value = '';
+      isNewPayor = false;
+      payorForm.classList.remove('visible');
+      renderPayors();
     } catch (err) {
-      setStatus('Error: ' + err.message, true);
+      setStatus(payorStatus, 'Error: ' + err.message, true);
     }
   }
 
-  function startNewPayer() {
-    insuranceNameInput.value = '';
-    aliasesInput.value = '';
-    selectedIndex = -1;
-    originalName = '';
-    isNew = true;
-    showForm(true);
-    updateModeIndicator();
-    renderList();
-    setStatus('Enter new payer details, then click "Create".');
-    insuranceNameInput.focus();
+  function startNewPayor() {
+    payorNameInput.value = '';
+    payorAliasesInput.value = '';
+    selectedPayorIndex = -1;
+    originalPayorName = '';
+    isNewPayor = true;
+    payorForm.classList.add('visible');
+    document.getElementById('cancelPayorBtn').style.display = 'inline-flex';
+    document.getElementById('updatePayorBtn').innerHTML = '<i class="bi bi-plus-circle"></i> Create';
+    document.getElementById('deletePayorBtn').disabled = true;
+    document.getElementById('addPayorBtn').style.display = 'none';
+    renderPayors();
+    setStatus(payorStatus, 'Enter new payor details, then click "Create".');
+    payorNameInput.focus();
   }
 
-  // ---------- event listeners ----------
-  updateBtn.addEventListener('click', saveCurrentPayer);
-  deleteBtn.addEventListener('click', deleteCurrentPayer);
-  addBtn.addEventListener('click', startNewPayer);
-  cancelBtn.addEventListener('click', cancelNewPayer);
-  refreshBtn.addEventListener('click', loadPayersFromServer);
+  // ============ Practice Functions ============
+  function renderPractices() {
+    let html = '';
+    if (practices.length === 0) {
+      html = `<div style="color:var(--muted); text-align:center; padding:20px 0;">No practices defined</div>`;
+    } else {
+      practices.forEach((p, idx) => {
+        const active = (!isNewPractice && idx === selectedPracticeIndex) ? 'active' : '';
+        const aliasCount = p.aliases ? p.aliases.length : 0;
+        html += `
+          <div class="list-item ${active}" data-index="${idx}">
+            <span>${p.name || '(unnamed)'}</span>
+            <span class="badge-aliases">${aliasCount} alias${aliasCount !== 1 ? 'es' : ''}</span>
+          </div>
+        `;
+      });
+    }
+    practiceItems.innerHTML = html;
+    practiceCount.textContent = practices.length;
 
-  // ---------- init ----------
-  loadPayersFromServer();
+    document.querySelectorAll('#practiceItems .list-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.index, 10);
+        if (isNewPractice) {
+          if (!confirm('You have unsaved changes. Discard and select existing practice?')) return;
+          cancelNewPractice();
+        }
+        selectPractice(idx);
+      });
+    });
+  }
+
+  function selectPractice(idx) {
+    if (idx < 0 || idx >= practices.length) {
+      selectedPracticeIndex = -1;
+      originalPracticeName = '';
+      practiceNameInput.value = '';
+      practiceAliasesInput.value = '';
+      isNewPractice = false;
+      practiceForm.classList.remove('visible');
+      renderPractices();
+      return;
+    }
+    selectedPracticeIndex = idx;
+    const p = practices[idx];
+    originalPracticeName = p.name;
+    practiceNameInput.value = p.name || '';
+    practiceAliasesInput.value = (p.aliases || []).join(', ');
+    isNewPractice = false;
+    practiceForm.classList.add('visible');
+    document.getElementById('cancelPracticeBtn').style.display = 'none';
+    document.getElementById('updatePracticeBtn').innerHTML = '<i class="bi bi-pencil"></i> Update';
+    document.getElementById('deletePracticeBtn').disabled = false;
+    document.getElementById('addPracticeBtn').style.display = 'flex';
+    renderPractices();
+    setStatus(practiceStatus, `Editing "${p.name}"`);
+  }
+
+  function cancelNewPractice() {
+    isNewPractice = false;
+    if (selectedPracticeIndex >= 0 && selectedPracticeIndex < practices.length) {
+      const p = practices[selectedPracticeIndex];
+      practiceNameInput.value = p.name || '';
+      practiceAliasesInput.value = (p.aliases || []).join(', ');
+      practiceForm.classList.add('visible');
+    } else {
+      practiceNameInput.value = '';
+      practiceAliasesInput.value = '';
+      practiceForm.classList.remove('visible');
+    }
+    document.getElementById('cancelPracticeBtn').style.display = 'none';
+    document.getElementById('updatePracticeBtn').innerHTML = '<i class="bi bi-pencil"></i> Update';
+    document.getElementById('deletePracticeBtn').disabled = false;
+    document.getElementById('addPracticeBtn').style.display = 'flex';
+    renderPractices();
+    setStatus(practiceStatus, 'Cancelled new practice.');
+  }
+
+  async function loadPractices() {
+    try {
+      const res = await fetch('/api/admin/practices');
+      if (!res.ok) throw new Error('Failed to fetch practices');
+      const data = await res.json();
+      practices = data.practices || [];
+      practices.sort((a, b) => a.name.localeCompare(b.name));
+      selectedPracticeIndex = -1;
+      originalPracticeName = '';
+      practiceNameInput.value = '';
+      practiceAliasesInput.value = '';
+      isNewPractice = false;
+      practiceForm.classList.remove('visible');
+      renderPractices();
+    } catch (err) {
+      setStatus(practiceStatus, 'Error loading practices: ' + err.message, true);
+    }
+  }
+
+  async function createPractice(name, aliases) {
+    const res = await fetch('/api/admin/practice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, aliases }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to create practice');
+    }
+    return await res.json();
+  }
+
+  async function updatePractice(name, aliases) {
+    const res = await fetch(`/api/admin/practice/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aliases }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to update practice');
+    }
+    return await res.json();
+  }
+
+  async function deletePractice(name) {
+    const res = await fetch(`/api/admin/practice/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to delete practice');
+    }
+    return await res.json();
+  }
+
+  async function savePractice() {
+    const name = practiceNameInput.value.trim();
+    if (!name) {
+      setStatus(practiceStatus, 'Practice name cannot be empty.', true);
+      return;
+    }
+    const aliases = practiceAliasesInput.value.split(',').map(s => s.trim()).filter(Boolean);
+
+    const duplicate = practices.some((p, idx) => {
+      if (isNewPractice) return p.name.toLowerCase() === name.toLowerCase();
+      return idx !== selectedPracticeIndex && p.name.toLowerCase() === name.toLowerCase();
+    });
+    if (duplicate) {
+      setStatus(practiceStatus, `A practice with name "${name}" already exists.`, true);
+      return;
+    }
+
+    try {
+      if (isNewPractice) {
+        await createPractice(name, aliases);
+        setStatus(practiceStatus, `Created "${name}".`);
+        await loadPractices();
+        const newIdx = practices.findIndex(p => p.name === name);
+        if (newIdx >= 0) {
+          selectedPracticeIndex = newIdx;
+          selectPractice(newIdx);
+        }
+      } else {
+        const oldName = originalPracticeName;
+        if (oldName.toLowerCase() !== name.toLowerCase()) {
+          await deletePractice(oldName);
+          await createPractice(name, aliases);
+          setStatus(practiceStatus, `Renamed "${oldName}" → "${name}".`);
+        } else {
+          await updatePractice(oldName, aliases);
+          setStatus(practiceStatus, `Updated "${name}".`);
+        }
+        await loadPractices();
+        const newIdx = practices.findIndex(p => p.name === name);
+        if (newIdx >= 0) {
+          selectedPracticeIndex = newIdx;
+          selectPractice(newIdx);
+        }
+      }
+    } catch (err) {
+      setStatus(practiceStatus, 'Error: ' + err.message, true);
+    }
+  }
+
+  async function deleteCurrentPractice() {
+    if (isNewPractice) {
+      setStatus(practiceStatus, 'Cannot delete a new practice that is not saved yet.', true);
+      return;
+    }
+    if (selectedPracticeIndex < 0 || selectedPracticeIndex >= practices.length) {
+      setStatus(practiceStatus, 'No practice selected.', true);
+      return;
+    }
+    const name = practices[selectedPracticeIndex].name || '(unnamed)';
+    if (!confirm(`Delete practice "${name}"?`)) return;
+    try {
+      await deletePractice(name);
+      setStatus(practiceStatus, `Deleted "${name}".`);
+      await loadPractices();
+      selectedPracticeIndex = -1;
+      originalPracticeName = '';
+      practiceNameInput.value = '';
+      practiceAliasesInput.value = '';
+      isNewPractice = false;
+      practiceForm.classList.remove('visible');
+      renderPractices();
+    } catch (err) {
+      setStatus(practiceStatus, 'Error: ' + err.message, true);
+    }
+  }
+
+  function startNewPractice() {
+    practiceNameInput.value = '';
+    practiceAliasesInput.value = '';
+    selectedPracticeIndex = -1;
+    originalPracticeName = '';
+    isNewPractice = true;
+    practiceForm.classList.add('visible');
+    document.getElementById('cancelPracticeBtn').style.display = 'inline-flex';
+    document.getElementById('updatePracticeBtn').innerHTML = '<i class="bi bi-plus-circle"></i> Create';
+    document.getElementById('deletePracticeBtn').disabled = true;
+    document.getElementById('addPracticeBtn').style.display = 'none';
+    renderPractices();
+    setStatus(practiceStatus, 'Enter new practice details, then click "Create".');
+    practiceNameInput.focus();
+  }
+
+  async function uploadEntityFile() {
+    const entity = bulkEntitySelect.value;
+    const file = bulkEntityFile.files[0];
+    const label = entity === 'payors' ? 'payor' : 'practice';
+    if (!file) {
+      setStatus(bulkStatus, `Choose a ${label} file first, then submit.`, true);
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    const originalButtonHTML = submitEntityFileBtn.innerHTML;
+    submitEntityFileBtn.disabled = true;
+    submitEntityFileBtn.innerHTML = '<span class="btn-loader" aria-hidden="true"></span> Updating...';
+    try {
+      const url = entity === 'payors' ? '/api/admin/payors/bulk-csv' : '/api/admin/practices/bulk-csv';
+      const res = await fetch(url, { method: 'POST', body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `Failed to import ${label}`);
+      }
+      const result = await res.json();
+      let msg = `Imported ${result.created} new, updated ${result.updated}.`;
+      if (result.errors.length > 0) msg += ` ${result.errors.length} errors.`;
+      setStatus(bulkStatus, msg, result.errors.length > 0);
+      bulkEntityFile.value = '';
+      selectedFileStatus.textContent = 'No file selected.';
+      await loadPayors();
+      await loadPractices();
+    } catch (err) {
+      setStatus(bulkStatus, 'Error: ' + err.message, true);
+    } finally {
+      submitEntityFileBtn.disabled = false;
+      submitEntityFileBtn.innerHTML = originalButtonHTML;
+    }
+  }
+
+  // ============ Refresh All ============
+  async function refreshAll() {
+    await Promise.all([loadPayors(), loadPractices()]);
+    setStatus(bulkStatus, 'Refreshed all data.');
+  }
+
+  // ============ Event Listeners ============
+  document.getElementById('addPayorBtn').addEventListener('click', startNewPayor);
+  document.getElementById('updatePayorBtn').addEventListener('click', savePayor);
+  document.getElementById('deletePayorBtn').addEventListener('click', deleteCurrentPayor);
+  document.getElementById('cancelPayorBtn').addEventListener('click', cancelNewPayor);
+
+  document.getElementById('addPracticeBtn').addEventListener('click', startNewPractice);
+  document.getElementById('updatePracticeBtn').addEventListener('click', savePractice);
+  document.getElementById('deletePracticeBtn').addEventListener('click', deleteCurrentPractice);
+  document.getElementById('cancelPracticeBtn').addEventListener('click', cancelNewPractice);
+
+  chooseEntityFileBtn.addEventListener('click', () => bulkEntityFile.click());
+  bulkEntityFile.addEventListener('change', () => {
+    const label = bulkEntitySelect.value === 'payors' ? 'payor' : 'practice';
+    selectedFileStatus.textContent = bulkEntityFile.files[0]
+      ? `Selected ${label} file: ${bulkEntityFile.files[0].name}`
+      : 'No file selected.';
+  });
+  bulkEntitySelect.addEventListener('change', () => {
+    bulkEntityFile.value = '';
+    selectedFileStatus.textContent = 'No file selected.';
+    setStatus(bulkStatus, '');
+  });
+  submitEntityFileBtn.addEventListener('click', uploadEntityFile);
+  document.getElementById('refreshBtn').addEventListener('click', refreshAll);
+
+  // ============ Init ============
+  loadPayors();
+  loadPractices();
 </script>
 </body>
 </html>

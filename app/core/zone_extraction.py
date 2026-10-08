@@ -13,16 +13,17 @@ CHECK_INSTRUMENT_SIGNALS = re.compile(
     r"\bPAYABLE THROUGH DRAFT\b|\bPAY(?:ABLE)?\s*TO\s*THE\s*ORDER\s*OF\b|"
     r"\bELECTRONIC PAYMENT CLEARINGHOUSE\b|\bMICR\b|\bACH TRACE\b|"
     r"\bISSUE DATE\b|\bAMOUNT\b|\bDOLLARS\b|\bPAY\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b|"
-    r"\bPAYMENT INFORMATION\b|\bEXPLANATIONS\b",
+    r"\bPAYMENT INFORMATION\b|\bEXPLANATIONS\b|\bNOTICE\b|\bSUMMARY\b"
+    r"\bPAYMENT\b|\bCheck/ACH\b|\bP.O.BOX\b",
     re.IGNORECASE,
 )
 
 CHECK_AMOUNT_PATTERN = re.compile(r'(?<![\d.])\$+\s*[\d,]+\.\d{2}(?!\d)')
 
-AMOUNT_LABEL_PATTERN = re.compile(r"\bAMOUNT\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b")
+AMOUNT_LABEL_PATTERN = re.compile(r"\bAMOUNT\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b|\bTRACE AMOUNT\b", re.IGNORECASE)
 EXPLICIT_CHECK_AMOUNT_PATTERN = re.compile(
     r"\b(?:PAYMENT\s*/?\s*CHECK|CHECK|NET\s+PAYMENT)\s*AMOUNT\b|"
-    r"\bAMOUNT\s+PAID\b|\bTRACE\b",
+    r"\bTRACE\s+AMOUNT\b|\bAMOUNT\s+PAID\b|\bTRACE\b",
     re.IGNORECASE,
 )
 DOLLAR_VALUE_PATTERN = re.compile(r"\$+\s*([\d,]+\.\d{2})(?!\d)", re.IGNORECASE,)
@@ -157,14 +158,13 @@ def extract_field_by_zone(pages, field_name, threshold=0.20):
             if field_name == "check_amount":
                 first_page_text = normalize_text(pages[0].get("text", ""))
                 first_twenty_lines = "\n".join(first_page_text.splitlines()[:20])
-                if not EXPLICIT_CHECK_AMOUNT_PATTERN.search(first_twenty_lines):
+                if EXPLICIT_CHECK_AMOUNT_PATTERN.search(first_twenty_lines):
                     for page in ordered:
                         result = extract_amount_from_instrument_page(page.get("text", ""))
                         if result.get("value"):
                             result["page_number"] = page.get("page_number")
                             result["source_page_type"] = "check_instrument"
                             return result
-
             result = _search_pages_by_level(ordered, field_name, threshold)
             if result["value"]:
                 result["source_page_type"] = "check_instrument"
@@ -193,7 +193,7 @@ def _search_pages_by_level(ordered_pages, field_name, threshold):
             candidates = find_field_candidates(page_text, field_name, aliases=aliases)
             if not candidates:
                 continue
-            candidates = deduplicate_candidates(candidates)
+            candidates = deduplicate_candidates(candidates,field_name)
             total_lines = len(normalize_text(page_text).splitlines())
             for cand in candidates:
                 zone = get_zone_for_line(cand.line_number, total_lines)
@@ -203,7 +203,7 @@ def _search_pages_by_level(ordered_pages, field_name, threshold):
                     zone_confidence_boost=get_zone_confidence_boost(zone),
                 ))
         if level_candidates:
-            result = _format_best_candidate(level_candidates, threshold)
+            result = _format_best_candidate(level_candidates, threshold,field_name)
             if result["value"]:
                 return result
     return _empty_field_result()
@@ -216,7 +216,7 @@ def _search_pages_by_level(ordered_pages, field_name, threshold):
 DIRECT_MATCH_MIN_SCORE = 0.90
 
 
-def _format_best_candidate(zone_candidates: List[ZoneCandidate], threshold: float) -> Dict:
+def _format_best_candidate(zone_candidates: List[ZoneCandidate], threshold: float,field_name: str) -> Dict:
     if not zone_candidates:
         return _empty_field_result()
 
@@ -233,7 +233,10 @@ def _format_best_candidate(zone_candidates: List[ZoneCandidate], threshold: floa
     # No clean same-line match exists -- NOW zone position is a legitimate
     # tiebreaker among candidates that are all somewhat ambiguous anyway.
     boosted = [(min(1.0, zc.candidate.score + zc.zone_confidence_boost), zc) for zc in zone_candidates]
-    boosted.sort(key=lambda x: x[0], reverse=True)
+    if field_name == "check_amount":
+        boosted.sort(key=lambda x: (x[0], -abs(x[1].candidate.position -x[1].candidate.alias_position)), reverse=True)
+    else:
+        boosted.sort(key=lambda x: x[0], reverse=True)
     best_score, best_zc = boosted[0]
     if best_score < threshold:
         return _empty_field_result()

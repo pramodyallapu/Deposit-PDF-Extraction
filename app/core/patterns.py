@@ -65,6 +65,7 @@ FIELD_PATTERNS = {
         r"(?:0?[1-9]|1[0-2])[/\-.](?:0?[1-9]|[12]\d|3[01])[/\-.](?:19|20)?\d{2}|"  # MM/DD/YY or MM/DD/YYYY
         r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{1,2},?\s*\d{2,4}|"  # Month DD, YYYY (space optional)
         r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}|"  # DD Month YYYY
+        r"\d{1,2}\s+\d{1,2}\s+\d{2}|"  # MM DD YY
         r"\d{6,8}"  # MMDDYY or MMDDYYYY (without separators)
         r")(?![A-Za-z0-9])",
         re.IGNORECASE
@@ -131,6 +132,7 @@ DATE_PATTERN_ENHANCED = re.compile(
     r'(?:\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})|'          # with separators
     r'(?:[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4})|'        # Month DD, YYYY
     r'(?:\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})|'          # DD Month YYYY
+    r'(?:\b\d{1,2}\s+\d{1,2}\s+\d{2}\b)|'          # MM DD YY
     r'(?:\b\d{6}\b)|'                                  # MMDDYY
     r'(?:\b\d{8}\b)',                                  # MMDDYYYY
     re.IGNORECASE
