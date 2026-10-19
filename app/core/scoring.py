@@ -20,6 +20,7 @@ class Candidate:
     context_score: float = 0.0
     position: int=0
     alias_position: int = 0
+    has_currency_symbol: bool = False
 
 # 5. NORMALIZATION (unchanged)
 def normalize_text(text: str) -> str:
@@ -41,6 +42,8 @@ def alias_regex(alias: str):
     pattern = separator.join(map(re.escape, words))
     pattern_without_spaces = r"".join(map(re.escape, words))
     combined_pattern = f"(?:{pattern}|{pattern_without_spaces})"
+    if alias.rstrip().endswith("#"):
+        combined_pattern += r"\s*#"
     return re.compile(r"(?<![A-Za-z0-9])" + combined_pattern + r"(?![A-Za-z0-9])", re.IGNORECASE)
 
 def find_aliases(lines, field_name, aliases=None):
@@ -163,12 +166,36 @@ def validate_amount(value: str):
 def validate_check_number(value: str):
     if not isinstance(value, str): return False
     value = value.strip()
-    if len(value) < 9 or len(value) > 25: return False
+    if len(value) < 4 or len(value) > 25: return False
     if not re.fullmatch(r"[A-Za-z0-9]+(?:[-/][A-Za-z0-9]+)*", value): return False
     if not any(c.isdigit() for c in value): return False
     bad_words = {"payment", "check", "number", "date", "amount", "provider", "payer", "insurance", "total", "paid", "service", "code", "cpt", "procedure"}
     if value.lower() in bad_words: return False
     return True
+
+
+CHECK_NUMBER_DATE_PATTERN = re.compile(
+    r"(?<!\d)(?:"
+    r"\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|"
+    r"[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}|"
+    r"\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}"
+    r")(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def check_number_candidate_score(value: str, source_text: str, position: int) -> float:
+    """Score candidates by validity and penalize tokens contained in calendar dates."""
+    if not validate_check_number(value):
+        return -0.30
+    candidate_end = position + len(value)
+    if any(
+        match.start() <= position and candidate_end <= match.end()
+        for match in CHECK_NUMBER_DATE_PATTERN.finditer(source_text)
+    ):
+        return -0.30
+    return 0.15
+
 
 def validate_cpt_code(value):
     if not value: return False
@@ -228,7 +255,11 @@ def context_score(field_name, text):
 DIRECTION_SCORES = {"right": 1.00, "left": 0.65, "below": 0.85, "above": 0.60}
 
 # 12. CANDIDATE SCORING (unchanged)
-def score_candidate(field_name, value, alias_weight, direction, distance, source_text, line_number, alias_line_number):
+def score_candidate(
+    field_name, value, alias_weight, direction, distance, source_text,
+    line_number, alias_line_number, candidate_source_text=None,
+    candidate_position=0, alias_position=0,
+):
     score = 0.0
     score += alias_weight * 0.35
     score += DIRECTION_SCORES.get(direction, 0.50) * 0.20
@@ -236,7 +267,10 @@ def score_candidate(field_name, value, alias_weight, direction, distance, source
     score += distance_score * 0.15
     score += context_score(field_name, source_text) * 0.15
     if field_name == "check_number":
-        score += 0.15 if validate_check_number(value) else -0.30
+        score += check_number_candidate_score(value, candidate_source_text or source_text, candidate_position)
+        if direction in ("above", "below"):
+            alignment = max(0.0, 1.0 - abs(candidate_position - alias_position) / 30.0)
+            score += alignment * 0.12
     elif field_name == "check_date":
         score += 0.20 if validate_date(value) else -0.40
     elif field_name == "check_amount":

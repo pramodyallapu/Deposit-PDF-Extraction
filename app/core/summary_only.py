@@ -1,4 +1,5 @@
 import re
+from .eob_extraction import detect_payor_and_practice_from_header
 
 def extract_summary_from_text_file(text: str) -> list:
     if not text:
@@ -52,4 +53,40 @@ def extract_summary_from_text_file(text: str) -> list:
             record = match.groupdict()
             records.append(record)
 
+    return records
+
+
+def _detail_header_index(lines):
+    """Line index of the detail-table header: Check# ... Status ... Payer."""
+    for i, line in enumerate(lines):
+        n = line.lower()
+        if "check#" in n and "status" in n and "payer" in n:
+            return i
+    return None
+
+
+def _payor_for_check(lines, start, check_number, span=5):
+    """First detail row for this check, plus its following lines, as a mini 'header page'."""
+    for i in range(start, len(lines)):
+        if lines[i].split(" ", 1)[0] == check_number:
+            snippet = "\n".join(lines[i:i + span])
+            page = {"page_number": 1, "text": snippet, "method": "text"}
+            result = detect_payor_and_practice_from_header([page], 1)
+            return result["insurance_name"]
+    return None
+
+
+def extract_summary_with_payor(text: str) -> list:
+    records = extract_summary_from_text_file(text)      # your original, unchanged
+    if not records:
+        return []
+
+    lines = [re.sub(r"\s+", " ", l).strip() for l in text.splitlines() if l.strip()]
+    start = _detail_header_index(lines)
+
+    for rec in records:
+        payor = _payor_for_check(lines, start, rec["check_number"]) if start is not None else None
+        rec["insurance_name"] = payor["value"] if payor else ""
+        rec["insurance_confidence"] = payor["confidence"] if payor else 0.0
+        rec["insurance_source"] = payor["source"] if payor else "not_found"
     return records

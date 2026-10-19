@@ -6,7 +6,9 @@ Run with:
 
 Endpoints:
     POST /api/extract          -- single PDF upload
+    POST /api/inspect-pdf      -- detect whether a PDF needs OCR
     POST /api/extract-batch    -- multiple PDF uploads
+    POST /api/extract-batch/{batch_id}/ocr-decision -- decide whether to OCR a scanned PDF
     GET  /api/records          -- list all submitted records
     POST /api/records          -- add a new record
     DELETE /api/records        -- clear all records
@@ -19,6 +21,7 @@ Endpoints:
 """
 import asyncio
 import csv
+from datetime import datetime
 import io
 import logging
 import os
@@ -31,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List
 
-from app.core.summary_only import extract_summary_from_text_file
+from app.core.summary_only import extract_summary_with_payor,extract_summary_from_text_file
 from app.database import database
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Header, UploadFile
@@ -41,7 +44,7 @@ from openpyxl import load_workbook
 from pydantic import BaseModel
 
 from app.core.payers import get_all_practices
-from app.core.pdf_extraction import extract_pages_from_pdf
+from app.core.pdf_extraction import extract_pages_from_pdf, pdf_requires_ocr
 from app.core.eob_extraction import extract_eob_data_from_pages
 from app.core.scoring import normalize_date_to_ddmmyyyy
 from app.models.schemas import (
@@ -105,6 +108,10 @@ batch_extraction_lock = threading.Lock()
 
 class BatchExtractionRequest(BaseModel):
     batch_location: str
+
+
+class BatchOCRDecisionRequest(BaseModel):
+    proceed: bool
 
 
 def generate_batch_id() -> str:
@@ -183,15 +190,15 @@ def _extract_sync(file_path: str, filename: str):
     if not pages:
         raise ValueError("No content could be extracted from this file.")
 
-    for page in pages:
-        print("------------------------------------------")
-        print(f"Page {page['page_number']} (method: {page['method']}):")
-        print(page["text"])
-        print("------------------------------------------")
+    # for page in pages:
+    #     print("------------------------------------------")
+    #     print(f"Page {page['page_number']} (method: {page['method']}):")
+    #     print(page["text"])
+    #     print("------------------------------------------")
 
     # TXT/TEXT: extract all summary records
     if is_text:
-        summary_records = extract_summary_from_text_file(pages[0]["text"])
+        summary_records = extract_summary_with_payor(pages[0]["text"])
 
         if summary_records:
             total_amount = sum(
@@ -229,9 +236,9 @@ def _extract_sync(file_path: str, filename: str):
                         alias_used="summary",
                     ),
                     insurance_name=FieldResult(
-                        value="",
-                        confidence=0.0,
-                        alias_used=None,
+                        value=summary.get("insurance_name", ""),
+                        confidence=summary.get("insurance_confidence", 0.0),
+                        alias_used=summary.get("insurance_source", None),
                     ),
                     cpt_codes=CPTResult(
                         cpt_codes=[],
@@ -346,6 +353,35 @@ async def extract_single(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=422,
             detail=f"Extraction failed: {exc}",
+        )
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            logger.warning("Could not remove temp file: %s", tmp_path)
+
+
+@app.post("/api/inspect-pdf")
+async def inspect_pdf(file: UploadFile = File(...)):
+    filename = file.filename or ""
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files can be inspected.")
+
+    tmp_path = await _save_upload_to_temp(file)
+    try:
+        loop = asyncio.get_running_loop()
+        requires_ocr = await loop.run_in_executor(
+            EXECUTOR,
+            pdf_requires_ocr,
+            tmp_path,
+        )
+        return {"success": True, "requires_ocr": requires_ocr}
+    except Exception as exc:
+        logger.exception("PDF inspection failed: %s", filename)
+        raise HTTPException(
+            status_code=422,
+            detail=f"PDF inspection failed: {exc}",
         )
     finally:
         try:
@@ -478,6 +514,8 @@ async def process_batch(batch_id: str):
             "current_error": None,
             "current_save_result": None,
             "waiting_for_approval": False,
+            "waiting_for_ocr_decision": False,
+            "ocr_proceed": None,
             "current_status": "extracting",
             "approval_processed": False,  # Add flag to track if approval was processed
         })
@@ -496,6 +534,31 @@ async def process_batch(batch_id: str):
                     f"PDF not found: {file_path}"
                 )
 
+            loop = asyncio.get_running_loop()
+            requires_ocr = await loop.run_in_executor(
+                EXECUTOR,
+                pdf_requires_ocr,
+                str(file_path),
+            )
+            if requires_ocr:
+                batch["current_status"] = "waiting_for_ocr_decision"
+                batch["waiting_for_ocr_decision"] = True
+                batch["ocr_proceed"] = None
+                while batch["ocr_proceed"] is None:
+                    if batch.get("abort", False):
+                        batch["status"] = "cancelled"
+                        return
+                    await asyncio.sleep(0.2)
+
+                proceed_with_ocr = batch["ocr_proceed"]
+                batch["waiting_for_ocr_decision"] = False
+                batch["ocr_proceed"] = None
+                if not proceed_with_ocr:
+                    batch["current_status"] = "skipped"
+                    batch["skipped_count"] += 1
+                    continue
+
+            batch["current_status"] = "extracting"
             result = await extract_batch_pdf(file_path)
 
             result_for_ui = (
@@ -605,6 +668,8 @@ async def extract_batch(payload: BatchExtractionRequest):
         "current_save_result": None,
         "current_status": "queued",
         "waiting_for_approval": False,
+        "waiting_for_ocr_decision": False,
+        "ocr_proceed": None,
         "approved_count": 0,
         "failed_count": 0,
         "skipped_count": 0,
@@ -662,6 +727,7 @@ async def get_batch_status(batch_id: str):
         "current_file": batch["current_file"],
         "current_status": batch["current_status"],
         "waiting_for_approval": batch["waiting_for_approval"],
+        "waiting_for_ocr_decision": batch.get("waiting_for_ocr_decision", False),
         "approved_count": batch["approved_count"],
         "failed_count": batch["failed_count"],
         "skipped_count": batch["skipped_count"],
@@ -683,6 +749,7 @@ async def get_batch_current(batch_id: str):
         "current_status": batch["current_status"],
         "result": batch.get("current_result"),
         "waiting_for_approval": batch["waiting_for_approval"],
+        "waiting_for_ocr_decision": batch.get("waiting_for_ocr_decision", False),
         "error": batch.get("current_error"),
         "save_result": batch.get("current_save_result"),
         "approval_processed": batch.get("approval_processed", False),
@@ -713,6 +780,30 @@ async def get_batch_file_endpoint(
         media_type="application/pdf",
         filename=file_path.name,
     )
+
+
+@app.post("/api/extract-batch/{batch_id}/ocr-decision")
+async def decide_batch_ocr(batch_id: str, decision: BatchOCRDecisionRequest):
+    batch = get_batch(batch_id)
+
+    if not batch.get("waiting_for_ocr_decision", False):
+        raise HTTPException(
+            status_code=400,
+            detail="No scanned PDF is waiting for an OCR decision.",
+        )
+    if batch.get("ocr_proceed") is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="An OCR decision has already been submitted for this PDF.",
+        )
+
+    batch["ocr_proceed"] = decision.proceed
+    return {
+        "success": True,
+        "batch_id": batch_id,
+        "filename": batch["current_file"],
+        "proceed": decision.proceed,
+    }
 
 
 @app.post("/api/extract-batch/{batch_id}/approve")
