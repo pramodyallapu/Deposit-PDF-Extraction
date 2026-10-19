@@ -12,7 +12,7 @@ from collections import defaultdict
 from . import payers as payers_module
 from .field_extraction import extract_field
 from .zone_extraction import extract_field_by_zone
-from .cpt_extraction import extract_cpt_codes
+from .cpt_extraction import extract_claim_totals_summary, extract_cpt_codes
 from .scoring import validate_check_number
 from .patterns import NAME_BOILERPLATE_BLOCKLIST, US_ADDRESS_LINE, LABEL_FRAGMENT_WORDS
 
@@ -162,6 +162,12 @@ def extract_eob_data_from_pages(pages):
     total_pages = len(pages)
     header_page_count = get_header_page_range(total_pages)
     candidate_pages = get_candidate_pages(pages, header_page_count)
+    # # print("Candidate pages :")
+    # for page in candidate_pages:
+    #     print("------------------------------------------")
+    #     print(f"Page {page['page_number']} (method: {page['method']}):")
+    #     print(page["text"])
+    #     print("------------------------------------------")
 
     header_pages = pages[:header_page_count]
     full_text = "\n\n".join(p["text"] for p in pages)
@@ -233,6 +239,23 @@ def extract_eob_data_from_pages(pages):
         }
 
     result["cpt_codes"] = extract_cpt_codes(full_text)
+    claim_totals = extract_claim_totals_summary(full_text)
+    if claim_totals.get("net_total_paid") is not None:
+        result["check_amount"] = {
+            "value": claim_totals["net_total_paid"],
+            "confidence": 0.99,
+            "alias_used": "NET TOTAL PAID",
+            "direction": "summary",
+            "line_number": None,
+            "zone": None,
+            "label_level": None,
+            "page_number": None,
+            "zone_confidence_boost": 0.0,
+            "original_score": 0.99,
+            "match_type": "claim_totals_summary",
+            "candidates_considered": 1,
+            "all_candidates": [],
+        }
 
     result["_meta"] = {
         "total_pages": total_pages,

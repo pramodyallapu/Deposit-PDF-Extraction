@@ -87,7 +87,130 @@ TABLE_HEADER_PATTERN = re.compile(
     r'\b(?:SVCS|CHARGES|AMOUNT|PAYABLE)\b.*\bCODE\b',
     re.I
 )
+SERVICE_LINE_SECTION_PATTERN = re.compile(r'\bservice\s+line\s+information\b', re.I)
 TABLE_END_PATTERN = re.compile(r'^\s*TOTALS?\b', re.I)
+CLAIM_TOTALS_HEADER_PATTERN = re.compile(r'\bCLAIM\s+TYPE\s+TOTALS\b', re.I)
+GRAND_TOTALS_PATTERN = re.compile(r'\bGRAND\s+TOTALS\b', re.I)
+NET_TOTAL_PAID_PATTERN = re.compile(r'\bNET\s+TOTAL\s+PAID\b', re.I)
+NUMBER_OF_CLAIMS_PATTERN = re.compile(r'\bNUMBER\s+OF\s+CLAIMS\b', re.I)
+CLAIM_TOTAL_LABEL_PATTERN = re.compile(
+    r'\bNET\s+TOTAL\s+PAID\b|\bTOTAL\s+PAID\b|\bTOTAL\s+DENY\b', re.I
+)
+SUMMARY_AMOUNT_PATTERN = re.compile(
+    r'(?<![\d.])-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d)'
+)
+SUMMARY_COUNT_PATTERN = re.compile(r'(?<![\d.,])\d[\d,]*(?![\d.,])')
+
+
+def extract_claim_totals_summary(text):
+    """Read NET TOTAL PAID and NUMBER OF CLAIMS from a claim-totals summary."""
+    if not isinstance(text, str) or not text:
+        return {}
+
+    lines = text.splitlines()
+    for header_idx, line in enumerate(lines):
+        if not CLAIM_TOTALS_HEADER_PATTERN.search(line):
+            continue
+        header_window = lines[header_idx:header_idx + 4]
+        if not any(GRAND_TOTALS_PATTERN.search(header_line) for header_line in header_window):
+            continue
+
+        block_end = min(len(lines), header_idx + 21)
+        block = lines[header_idx:block_end]
+        net_label = None
+        for relative_idx, summary_line in enumerate(block):
+            match = NET_TOTAL_PAID_PATTERN.search(summary_line)
+            if match:
+                net_label = (relative_idx, match)
+                break
+        if net_label is None:
+            continue
+
+        net_idx, net_match = net_label
+        amount = _summary_amount_for_label(block, net_idx, net_match.start(), net_match.end())
+        claim_count = _summary_claim_count(block, net_idx)
+        if amount is not None or claim_count is not None:
+            return {
+                "net_total_paid": amount,
+                "number_of_claims": claim_count,
+            }
+
+    return {}
+
+
+def _summary_amount_for_label(lines, label_idx, label_start, label_end):
+    line = lines[label_idx]
+    amounts = list(SUMMARY_AMOUNT_PATTERN.finditer(line))
+    amounts_after_label = [match for match in amounts if match.start() >= label_end]
+    if amounts_after_label:
+        labels = list(CLAIM_TOTAL_LABEL_PATTERN.finditer(line))
+        if (
+            len(amounts) >= len(labels) > 1
+            and labels
+            and all(label.end() <= amounts[0].start() for label in labels)
+        ):
+            target_label = next(
+                (index for index, label in enumerate(labels) if label.start() == label_start),
+                None,
+            )
+            if target_label is not None and target_label < len(amounts):
+                return amounts[target_label].group().replace(",", "")
+        return amounts_after_label[0].group().replace(",", "")
+
+    for offset in range(1, 3):
+        idx = label_idx + offset
+        if idx >= len(lines) or CLAIM_TOTAL_LABEL_PATTERN.search(lines[idx]):
+            break
+        amounts = list(SUMMARY_AMOUNT_PATTERN.finditer(lines[idx]))
+        if amounts:
+            nearest = min(amounts, key=lambda match: abs(match.start() - label_start))
+            return nearest.group().replace(",", "")
+    return None
+
+
+def _first_count_after(text_part):
+    counts = list(SUMMARY_COUNT_PATTERN.finditer(text_part))
+    if counts:
+        return int(counts[0].group().replace(",", ""))
+    return None
+
+
+def _summary_claim_count(lines, net_idx):
+    """Return the NUMBER OF CLAIMS count belonging to the NET TOTAL PAID row.
+
+    Only the NUMBER OF CLAIMS label on the NET TOTAL PAID row is used; labels on
+    the rows above (VOIDS-ADJUSTS, TOTAL PENDS, TOTAL PAID, TOTAL DENY) are ignored.
+    """
+    # 1) Same row as NET TOTAL PAID (normal layout).
+    same = NUMBER_OF_CLAIMS_PATTERN.search(lines[net_idx])
+    if same:
+        count = _first_count_after(lines[net_idx][same.end():])
+        if count is not None:
+            return count
+        # Label on this row but count wrapped to the next line(s).
+        for offset in range(1, 3):
+            idx = net_idx + offset
+            if idx >= len(lines) or CLAIM_TOTAL_LABEL_PATTERN.search(lines[idx]):
+                break
+            if NUMBER_OF_CLAIMS_PATTERN.search(lines[idx]):
+                break
+            count = _first_count_after(lines[idx])
+            if count is not None:
+                return count
+        return None
+
+    # 2) Flattened layout: labels and counts split from the amount rows.
+    #    Map by row order: the Nth total row pairs with the Nth NUMBER OF CLAIMS.
+    total_rows = [i for i, l in enumerate(lines) if CLAIM_TOTAL_LABEL_PATTERN.search(l)
+                  or re.search(r'\bVOIDS\b|\bTOTAL\s+PENDS?\b', l, re.I)]
+    claim_rows = [i for i, l in enumerate(lines) if NUMBER_OF_CLAIMS_PATTERN.search(l)]
+    if net_idx in total_rows and len(claim_rows) == len(total_rows):
+        row = claim_rows[total_rows.index(net_idx)]
+        match = NUMBER_OF_CLAIMS_PATTERN.search(lines[row])
+        count = _first_count_after(lines[row][match.end():])
+        if count is not None:
+            return count
+    return None
 
 
 def has_table_header_above(line_idx, lines, window=6):
@@ -113,6 +236,8 @@ def is_lookalike_candidate(match, line_idx, lines):
     code = match.group(1)
     if not code.isdigit():
         return False
+    if len(code) == 5 and re.match(r'-\d{6,}(?:-\d+)+\b', line[end:]):
+        return True
     if len(code) == 5 and re.match(r'-\d{4}\b', line[end:]):
         return True
     before = line[:start]
@@ -452,6 +577,8 @@ def extract_cpt_codes(text):
                 r'\b(?:service|medical|behavioral|treatment|autism|procedure|'
                 r'procedure\s*code|place|home|office|hospital|hcpcs|cpt|therapy|'
                 r'visit|surgery|diagnosis)\b', block_text, re.I
+            )) or bool(SERVICE_LINE_SECTION_PATTERN.search(
+                "\n".join(lines[max(0, date_idx - 7):date_idx])
             ))
             if not (has_date and has_money):
                 continue
@@ -546,6 +673,10 @@ def extract_cpt_codes(text):
     # for anchor, codes in service_records.items():
     #     print(f"  {anchor}: {', '.join(codes)}")
     cpt_total_occurrences = len(service_records)
+    claim_summary = extract_claim_totals_summary(text)
+    summary_claim_count = claim_summary.get("number_of_claims")
+    if summary_claim_count is not None:
+        cpt_total_occurrences = summary_claim_count
 
     # ============================================================
     # CALCULATE CONFIDENCE
@@ -559,10 +690,12 @@ def extract_cpt_codes(text):
             confidence = min(1.0, confidence + 0.1)
         if any(d['source'] == 'logical_table_record' for d in code_details.values()):
             confidence = min(1.0, confidence + 0.2)
+    if summary_claim_count:
+        confidence = 1.0
 
     return {
         "cpt_codes": sorted(unique_codes),
-        "cpt_count": len(unique_codes),
+        "cpt_count": summary_claim_count if summary_claim_count is not None else len(unique_codes),
         "cpt_total_occurrences": cpt_total_occurrences,
         "code_frequencies": code_counts,
         "extraction_confidence": round(confidence, 3),

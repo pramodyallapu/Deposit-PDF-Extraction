@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 
 from .field_extraction import find_field_candidates, deduplicate_candidates
 from .scoring import Candidate, normalize_text
-from .label_hierarchy import get_aliases_by_level
+from .label_hierarchy import get_aliases_by_level, FIELD_LABEL_COMBINATIONS
 import re
 
 CHECK_INSTRUMENT_SIGNALS = re.compile(
@@ -13,21 +13,68 @@ CHECK_INSTRUMENT_SIGNALS = re.compile(
     r"\bPAYABLE THROUGH DRAFT\b|\bPAY(?:ABLE)?\s*TO\s*THE\s*ORDER\s*OF\b|"
     r"\bELECTRONIC PAYMENT CLEARINGHOUSE\b|\bMICR\b|\bACH TRACE\b|"
     r"\bISSUE DATE\b|\bAMOUNT\b|\bDOLLARS\b|\bPAY\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b|"
-    r"\bPAYMENT INFORMATION\b|\bEXPLANATIONS\b|\bNOTICE\b|\bSUMMARY\b"
+    r"\bPAYMENT INFORMATION\b|\bEXPLANATIONS\b|\bNOTICE\b|\bSUMMARY\b|"
     r"\bPAYMENT\b|\bCheck/ACH\b|\bP.O.BOX\b",
     re.IGNORECASE,
 )
 
-CHECK_AMOUNT_PATTERN = re.compile(r'(?<![\d.])\$+\s*[\d,]+\.\d{2}(?!\d)')
+CHECK_AMOUNT_PATTERN = re.compile(r'(?<![\d.])\$+\s*\**\s*[\d,]+\.\d{2}(?!\d)')
 
-AMOUNT_LABEL_PATTERN = re.compile(r"\bAMOUNT\b|\bPAYDOLLARSCENTS\b|\bPAY DOLLARS CENTS\b|\bTRACE AMOUNT\b", re.IGNORECASE)
-EXPLICIT_CHECK_AMOUNT_PATTERN = re.compile(
-    r"\b(?:PAYMENT\s*/?\s*CHECK|CHECK|NET\s+PAYMENT)\s*AMOUNT\b|"
-    r"\bTRACE\s+AMOUNT\b|\bAMOUNT\s+PAID\b|\bTRACE\b",
+AMOUNT_LABEL_PATTERN = re.compile(
+    r"\bPAYMENT\b|\bAMOUNT\b|\bPAYDOLLARSCENTS\b|"
+    r"\bPAY\s+DOLLARS\s+CENTS\b|\bTRACE\s+AMOUNT\b",
     re.IGNORECASE,
 )
-DOLLAR_VALUE_PATTERN = re.compile(r"\$+\s*([\d,]+\.\d{2})(?!\d)", re.IGNORECASE,)
+EXPLICIT_CHECK_AMOUNT_PATTERN = re.compile(
+    r"\b(?:PAYMENT\s*/?\s*CHECK|CHECK|NET\s+PAYMENT)\s*AMOUNT\b|"
+    r"\bTRACE\s+AMOUNT\b|\bAMOUNT\s+PAID\b|"
+    r"\bPAY\s+DOLLARS\s+CENTS\b|\bPAYDOLLARSCENTS\b|\bTRACE\b",
+    re.IGNORECASE,
+)
+# Labels that sit directly on the physical check stub. When one of these is
+# present it is authoritative and must win over generic AMOUNT/PAYMENT words
+# that appear in EOB body text (e.g. "ALLOWED AMOUNT AS PAYMENT IN FULL"
+# followed by "CONTRACTUAL ADJUSTMENT IS $120.19").
+PRIORITY_AMOUNT_LABEL_PATTERN = re.compile(
+    r"\bPAY\s*DOLLARS\s*CENTS\b|\bPAYDOLLARSCENTS\b|\bTRACE\s+AMOUNT\b",
+    re.IGNORECASE,
+)
+PRIORITY_LABEL_LOOKAHEAD = 3
 
+DOLLAR_VALUE_PATTERN = re.compile(
+    r"\$+\s*\**\s*([\d,]+\.\d{2})(?!\d)",
+    re.IGNORECASE,
+)
+
+NO_PAYMENT_PATTERNS = re.compile(
+    r"\bNO\s+PAY(?:MENT|EMENT)\s+(?:(?:BEING\s+)?MADE|DUE)?\b",
+    re.IGNORECASE,
+)
+
+NO_PAYMENT_LABEL_DISTANCE = 3
+
+
+def extract_zero_for_no_payment(page_text: str) -> Dict:
+    lines = normalize_text(page_text).splitlines()
+
+    for i, line in enumerate(lines):
+        if not AMOUNT_LABEL_PATTERN.search(line):
+            continue
+
+        # Check the label line and the next two lines.
+        nearby_text = " ".join(lines[i:min(len(lines), i + 3)])
+
+        if NO_PAYMENT_PATTERNS.search(nearby_text):
+            return {
+                "value": "0.00",
+                "confidence": 0.99,
+                "alias_used": "Payment Amount - No Payment made",
+                "match_type": "no_payment_zero",
+                "line_number": i + 1,
+                "all_candidates": [],
+            }
+
+    return _empty_field_result()
 
 def extract_amount_from_instrument_page(page_text: str) -> Dict:
     """extract_amount_from_instrument_page
@@ -46,6 +93,26 @@ def extract_amount_from_instrument_page(page_text: str) -> Dict:
     """
     lines = normalize_text(page_text).splitlines()
 
+    # Pass 1: strong check-stub labels (PAY DOLLARS CENTS / TRACE AMOUNT).
+    # Search the label line, then a few lines below, for a $-prefixed value.
+    for i, line in enumerate(lines):
+        priority_match = PRIORITY_AMOUNT_LABEL_PATTERN.search(line)
+        if not priority_match:
+            continue
+
+        same_line = DOLLAR_VALUE_PATTERN.search(line[priority_match.end():])
+        if same_line:
+            return _instrument_amount_result(same_line.group(1), i, "same_line")
+
+        for offset in range(1, PRIORITY_LABEL_LOOKAHEAD + 1):
+            idx = i + offset
+            if idx >= len(lines):
+                break
+            below_match = DOLLAR_VALUE_PATTERN.search(lines[idx])
+            if below_match:
+                return _instrument_amount_result(below_match.group(1), idx, "below")
+
+    # Pass 2: generic AMOUNT / PAYMENT labels (original behaviour).
     for i, line in enumerate(lines):
         label_match = AMOUNT_LABEL_PATTERN.search(line)
         if not label_match:
@@ -142,9 +209,57 @@ def _page_search_order(total_pages: int) -> List[int]:
     return [i for i in order if not (i in seen or seen.add(i))]
 
 
+def _has_explicit_amount_label(pages, window: int = 20) -> bool:
+    """
+    Look for an explicit check-amount label (e.g. "PAY DOLLARS CENTS",
+    "AMOUNT PAID", "TRACE AMOUNT") in a small window of lines:
+
+      1. first `window` lines of the PDF (first page)
+      2. if not found -> last `window` lines of the PDF (last page)
+      3. if not found -> last `window` lines of the first page
+         (kept so single-page / earlier behaviour does not regress)
+    """
+    if not pages:
+        return False
+
+    def _lines(page):
+        return normalize_text(page.get("text", "")).splitlines()
+
+    first_lines = _lines(pages[0])
+    last_lines = _lines(pages[-1])
+
+    windows = (
+        first_lines[:window],    # 1. first 20 lines of PDF
+        last_lines[-window:],    # 2. last 20 lines of PDF
+        first_lines[-window:],   # 3. last 20 lines of first page
+    )
+    for chunk in windows:
+        if EXPLICIT_CHECK_AMOUNT_PATTERN.search("\n".join(chunk)):
+            return True
+    return False
+
+
 def extract_field_by_zone(pages, field_name, threshold=0.20):
     if not pages:
         return _empty_field_result()
+
+    if field_name == "check_amount":
+        page_order = _page_search_order(len(pages))
+
+        for i in page_order:
+            page = pages[i]
+            result = extract_zero_for_no_payment(
+                page.get("text", "")
+            )
+
+            if result.get("value"):
+                result["page_number"] = page.get("page_number")
+                result["source_page_type"] = (
+                    "check_instrument"
+                    if is_check_instrument_page(page.get("text", ""))
+                    else "document_wide"
+                )
+                return result
 
     if field_name in ("check_number", "check_date", "check_amount"):
         instrument_pages = [p for p in pages if is_check_instrument_page(p.get("text", ""))]
@@ -155,11 +270,23 @@ def extract_field_by_zone(pages, field_name, threshold=0.20):
             # disbursement record -- the summary table's row may or may not
             # even represent a total.
             ordered = sorted(instrument_pages, key=lambda p: p.get("page_number", 0))
+            # print("Ordered instrument pages:")
+            # for page in pages:
+            #     print("------------------------------------------")
+            #     print(f"Page {page['page_number']} (method: {page['method']}):")
+            #     print(page["text"])
+            #     print("------------------------------------------")
             if field_name == "check_amount":
-                first_page_text = normalize_text(pages[0].get("text", ""))
-                first_twenty_lines = "\n".join(first_page_text.splitlines()[:20])
-                if EXPLICIT_CHECK_AMOUNT_PATTERN.search(first_twenty_lines):
+                has_explicit_amount_label = _has_explicit_amount_label(pages)
+
+                if has_explicit_amount_label:
                     for page in ordered:
+                        # result = extract_zero_for_no_payment(page.get("text",""))
+                        # if result.get("value"):
+                        #     result["page_number"] = page.get("page_number")
+                        #     result["source_page_type"] = "check_instrument"
+                        #     print("NO PAY :: ", result)
+                        #     return result
                         result = extract_amount_from_instrument_page(page.get("text", ""))
                         if result.get("value"):
                             result["page_number"] = page.get("page_number")
@@ -179,8 +306,150 @@ def extract_field_by_zone(pages, field_name, threshold=0.20):
     return result
 
 
+def sort_combinations_by_match_count(combinations, page_text):
+    """Sort combinations by the number of labels found in the text."""
+    matched = []
+
+    for combination in combinations:
+        labels = combination.get("labels", [])
+        match_count = sum(
+            1
+            for label in labels
+            if re.search(
+                rf"(?<!\w){re.escape(label.strip())}(?!\w)",
+                page_text,
+                re.IGNORECASE,
+            )
+        )
+        matched.append((match_count, combination))
+
+    matched.sort(key=lambda item: item[0], reverse=True)
+    return [combination for _, combination in matched]
+
+
+
+def _find_label_combination(ordered_pages, field_name, threshold):
+    """Try same-page combinations, then cross-page combinations."""
+    combinations = FIELD_LABEL_COMBINATIONS.get(field_name, [])
+
+    def label_matches(label, text):
+        return bool(re.search(
+            rf"(?<!\w){re.escape(label.strip())}(?!\w)",
+            text,
+            re.IGNORECASE,
+        ))
+
+    def extract_from_page(page, preferred_label, labels):
+        page_text = page.get("text", "")
+        candidates = find_field_candidates(
+            page_text, field_name, aliases=[(preferred_label, 1.0)]
+        )
+        if not candidates:
+            return _empty_field_result()
+
+        candidates = deduplicate_candidates(candidates, field_name)
+        total_lines = len(normalize_text(page_text).splitlines())
+
+        zone_candidates = []
+        for candidate in candidates:
+            zone = get_zone_for_line(candidate.line_number, total_lines)
+            zone_candidates.append(ZoneCandidate(
+                candidate=candidate,
+                zone=zone,
+                label_level=0,
+                page_number=page.get("page_number"),
+                zone_confidence_boost=get_zone_confidence_boost(zone),
+            ))
+
+        result = _format_best_candidate(
+            zone_candidates, threshold, field_name
+        )
+        if result.get("value"):
+            result["match_type"] = "label_combination"
+            result["label_combination"] = labels
+        return result
+
+    # Rule 1: All labels on the same page.
+    for page in ordered_pages:
+        page_text = page.get("text", "")
+        if not page_text.strip():
+            continue
+
+        for combination in sort_combinations_by_match_count(
+            combinations, page_text
+        ):
+            labels = combination.get("labels", [])
+            preferred = combination.get("prefer")
+
+            if not labels or preferred not in labels:
+                continue
+            if not all(label_matches(label, page_text) for label in labels):
+                continue
+
+            print(
+                f"[LABEL MATCH] SAME PAGE | field={field_name} | "
+                f"page={page.get('page_number')} | "
+                f"combination={labels} | prefer={preferred}"
+            )
+
+            result = extract_from_page(page, preferred, labels)
+            if result.get("value"):
+                return result
+
+    # Rule 2: Labels distributed across pages.
+    all_text = "\n".join(
+        page.get("text", "") for page in ordered_pages
+    )
+
+    for combination in sort_combinations_by_match_count(
+        combinations, all_text
+    ):
+        labels = combination.get("labels", [])
+        preferred = combination.get("prefer")
+
+        if not labels or preferred not in labels:
+            continue
+        if not all(label_matches(label, all_text) for label in labels):
+            continue
+
+        preferred_pages = [
+            page for page in ordered_pages
+            if label_matches(preferred, page.get("text", ""))
+        ]
+
+        for page in preferred_pages:
+            print(
+                f"[LABEL MATCH] ACROSS PAGES | field={field_name} | "
+                f"combination={labels} | prefer={preferred} | "
+                f"extract_page={page.get('page_number')}"
+            )
+
+            result = extract_from_page(page, preferred, labels)
+            if result.get("value"):
+                return result
+
+    print(f"[LABEL MATCH] LABEL HIERARCHY | field={field_name}")
+    return _empty_field_result()
+
 def _search_pages_by_level(ordered_pages, field_name, threshold):
-    """Level-cascade search restricted to a given, already-ordered page set."""
+    """Try label combinations first, then fall back to levels 1–3."""
+    if field_name == "check_amount":
+        for page in ordered_pages:
+            result = extract_zero_for_no_payment(
+                page.get("text", "")
+            )
+            if result.get("value"):
+                result["page_number"] = page.get("page_number")
+                return result
+    combination_result = _find_label_combination(
+        ordered_pages, field_name, threshold
+    )
+    if combination_result.get("value"):
+        return combination_result
+
+    currency_candidates = []
+    amount_fallback = None
+
     for level in (1, 2, 3):
         aliases = get_aliases_by_level(field_name, level)
         if not aliases:
@@ -190,22 +459,71 @@ def _search_pages_by_level(ordered_pages, field_name, threshold):
             page_text = page.get("text", "")
             if not page_text.strip():
                 continue
-            candidates = find_field_candidates(page_text, field_name, aliases=aliases)
+
+            candidates = find_field_candidates(
+                page_text, field_name, aliases=aliases
+            )
             if not candidates:
                 continue
-            candidates = deduplicate_candidates(candidates,field_name)
+
+            candidates = deduplicate_candidates(candidates, field_name)
             total_lines = len(normalize_text(page_text).splitlines())
-            for cand in candidates:
-                zone = get_zone_for_line(cand.line_number, total_lines)
-                level_candidates.append(ZoneCandidate(
-                    candidate=cand, zone=zone, label_level=level,
-                    page_number=page.get("page_number"),
-                    zone_confidence_boost=get_zone_confidence_boost(zone),
-                ))
-        if level_candidates:
-            result = _format_best_candidate(level_candidates, threshold,field_name)
-            if result["value"]:
-                return result
+
+            for candidate in candidates:
+                zone = get_zone_for_line(
+                    candidate.line_number, total_lines
+                )
+                level_candidates.append(
+                    ZoneCandidate(
+                        candidate=candidate,
+                        zone=zone,
+                        label_level=level,
+                        page_number=page.get("page_number"),
+                        zone_confidence_boost=get_zone_confidence_boost(zone),
+                    )
+                )
+
+        if not level_candidates:
+            continue
+
+        result = _format_best_candidate(
+            level_candidates, threshold, field_name
+        )
+
+        if field_name == "check_amount":
+            currency_candidates.extend(
+                candidate
+                for candidate in level_candidates
+                if candidate.candidate.has_currency_symbol
+            )
+            if amount_fallback is None and result.get("value"):
+                amount_fallback = result
+            continue
+
+        if result.get("value"):
+            return result
+
+    if currency_candidates:
+        best_level = min(
+            candidate.label_level
+            for candidate in currency_candidates
+        )
+        currency_candidates = [
+            candidate
+            for candidate in currency_candidates
+            if candidate.label_level == best_level
+        ]
+
+        result = _format_best_candidate(
+            currency_candidates, 0.0, field_name
+        )
+        if result.get("value"):
+            result["confidence"] = max(result["confidence"], 0.90)
+            return result
+
+    if amount_fallback is not None:
+        return amount_fallback
+
     return _empty_field_result()
 
 

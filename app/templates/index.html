@@ -146,6 +146,25 @@
             color: var(--ink-soft);
             margin: 0;
         }
+        .ocr-prompt-overlay {
+            position: fixed; inset: 0; z-index: 1000; display: none;
+            align-items: center; justify-content: center; padding: 20px;
+            background: rgba(28, 38, 32, 0.58);
+        }
+        .ocr-prompt-overlay.show { display: flex; }
+        .ocr-prompt {
+            width: min(460px, 100%); padding: 24px; border-radius: var(--radius);
+            background: var(--card); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+        }
+        .ocr-prompt h2 { font: 700 1.2rem 'Roboto Slab', serif; margin-bottom: 10px; }
+        .ocr-prompt p { color: var(--ink-soft); line-height: 1.5; margin-bottom: 16px; }
+        .ocr-prompt .ocr-file-name {
+            display: block; margin-bottom: 18px; overflow-wrap: anywhere;
+            color: var(--muted); font: 0.8rem 'IBM Plex Mono', monospace;
+        }
+        .ocr-prompt .ocr-prompt-actions {
+            display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
+        }
         /* Upload area */
         .upload-area {
             position: relative; padding: 28px 20px; text-align: center;
@@ -381,6 +400,18 @@
     </style>
 </head>
 <body>
+    <div id="ocrPromptOverlay" class="ocr-prompt-overlay" role="presentation">
+        <section class="ocr-prompt" role="dialog" aria-modal="true" aria-labelledby="ocrPromptTitle">
+            <h2 id="ocrPromptTitle">Scanned PDF detected</h2>
+            <p>This PDF has pages without readable text. Proceed with OCR to read the full contents, or skip extraction for this PDF.</p>
+            <span id="ocrPromptFileName" class="ocr-file-name"></span>
+            <div class="ocr-prompt-actions">
+                <button class="btn btn-outline" id="skipOcrBtn" type="button">Skip PDF</button>
+                <button class="btn btn-primary" id="proceedOcrBtn" type="button">Proceed with OCR</button>
+            </div>
+        </section>
+    </div>
+
     <!-- Full page spinner -->
     <div id="spinnerOverlay">
         <div class="spin"></div>
@@ -573,6 +604,10 @@
         const batchProgressFill = document.getElementById('batchProgressFill');
         const batchFolderInput = document.getElementById('batchFolderInput');
         const startBatchBtn = document.getElementById('startBatchBtn');
+        const ocrPromptOverlay = document.getElementById('ocrPromptOverlay');
+        const ocrPromptFileName = document.getElementById('ocrPromptFileName');
+        const skipOcrBtn = document.getElementById('skipOcrBtn');
+        const proceedOcrBtn = document.getElementById('proceedOcrBtn');
 
         // State
         let submittedRecords = [];
@@ -587,6 +622,7 @@
         let lastStatus = null;
         let hasShownCurrentForCurrentFile = false;
         let isWaitingForNextFile = false;
+        let ocrDecisionPending = false;
 
         // ---------- Spinner helpers ----------
         function showSpinner(message = 'Processing…', subText = 'Please wait') {
@@ -630,6 +666,23 @@
             actionToast.style.color = isGood ? 'var(--accent-dark)' : 'var(--rose)';
             clearTimeout(window.toastTimer);
             window.toastTimer = setTimeout(() => { actionToast.textContent = ''; }, 4000);
+        }
+
+        function requestOcrDecision(fileName) {
+            ocrPromptFileName.textContent = fileName;
+            ocrPromptOverlay.classList.add('show');
+            return new Promise((resolve) => {
+                const finish = (proceed) => {
+                    ocrPromptOverlay.classList.remove('show');
+                    skipOcrBtn.removeEventListener('click', skip);
+                    proceedOcrBtn.removeEventListener('click', proceedWithOcr);
+                    resolve(proceed);
+                };
+                const skip = () => finish(false);
+                const proceedWithOcr = () => finish(true);
+                skipOcrBtn.addEventListener('click', skip);
+                proceedOcrBtn.addEventListener('click', proceedWithOcr);
+            });
         }
 
         function showError(msg) {
@@ -833,6 +886,18 @@
             return await response.json();
         }
 
+        async function inspectPdfForOcr(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await fetch('/api/inspect-pdf', { method: 'POST', body: formData });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || 'Could not inspect PDF for scanned pages.');
+            }
+            const data = await response.json();
+            return data.requires_ocr === true;
+        }
+
         async function submitRecord(record) {
             const res = await fetch('/api/records', {
                 method: 'POST',
@@ -868,6 +933,7 @@
             isProcessing = true;
             batchMode = true;
             abortRequested = false;
+            ocrDecisionPending = false;
             resetLedger();
             clearPreview();
             hideError();
@@ -939,6 +1005,31 @@
                 const status = await response.json();
                 lastStatus = status;
 
+                if (status.waiting_for_ocr_decision && !ocrDecisionPending) {
+                    ocrDecisionPending = true;
+                    hideSpinner();
+                    const proceed = await requestOcrDecision(status.current_file || 'scanned PDF');
+                    const decisionResponse = await fetch(
+                        `/api/extract-batch/${currentBatchId}/ocr-decision`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ proceed }),
+                        }
+                    );
+                    if (!decisionResponse.ok) {
+                        const err = await decisionResponse.json();
+                        throw new Error(err.detail || 'Could not submit the OCR decision.');
+                    }
+                    if (proceed) {
+                        showSpinner(`Reading ${status.current_file} with OCR…`, 'Extracting the full contents');
+                    } else {
+                        showToast(`Skipped scanned PDF: ${status.current_file}`, false);
+                    }
+                } else if (!status.waiting_for_ocr_decision) {
+                    ocrDecisionPending = false;
+                }
+
                 // Update progress
                 const progress = status.total > 0 ? (status.current / status.total) * 100 : 0;
                 batchProgressContainer.style.display = 'block';
@@ -1005,6 +1096,10 @@
 
             } catch (err) {
                 console.error('Poll error:', err);
+                if (lastStatus?.waiting_for_ocr_decision) {
+                    ocrDecisionPending = false;
+                    showToast(`OCR decision failed: ${err.message}`, false);
+                }
             } finally {
                 isPolling = false;
             }
@@ -1218,6 +1313,7 @@
             hideError();
 
             let processedCount = 0;
+            let skippedCount = 0;
             const total = files.length;
 
             for (let i = 0; i < total; i++) {
@@ -1264,6 +1360,18 @@
 
                 let data;
                 try {
+                    if (!isText && await inspectPdfForOcr(file)) {
+                        hideSpinner();
+                        const proceed = await requestOcrDecision(file.name);
+                        if (!proceed) {
+                            item.status = 'skipped';
+                            skippedCount++;
+                            updateFileList();
+                            clearPreview();
+                            continue;
+                        }
+                    }
+                    showSpinner(`Extracting ${file.name}…`, `File ${i + 1}/${total}`);
                     data = await extractSingleFile(file);
                 } catch (err) {
                     hideSpinner();
@@ -1328,8 +1436,8 @@
             extractAllBtn.disabled = false;
             clearFilesBtn.disabled = false;
             batchProgressFill.style.width = '100%';
-            progressMsg.textContent = `✅ Done — ${processedCount} files processed.`;
-            showToast(`Completed. ${processedCount} files processed.`);
+            progressMsg.textContent = `✅ Done — ${processedCount} files processed, ${skippedCount} skipped.`;
+            showToast(`Completed. ${processedCount} files processed, ${skippedCount} skipped.`);
             approveBtn.disabled = true;
             skipBtn.style.display = 'none';
             abortBatchBtn.style.display = 'none';
@@ -1437,6 +1545,19 @@
                         reader.readAsArrayBuffer(file);
                     });
                     await renderPdfPage(pdfData, 1, 1.5);
+                    showSpinner('Checking PDF pages…', file.name);
+                    const requiresOcr = await inspectPdfForOcr(file);
+                    hideSpinner();
+                    if (requiresOcr) {
+                        const proceed = await requestOcrDecision(file.name);
+                        if (!proceed) {
+                            uploadStatus.textContent = `Skipped scanned PDF: ${file.name}`;
+                            showToast(`Skipped scanned PDF: ${file.name}`, false);
+                            resetLedger();
+                            clearPreview();
+                            return;
+                        }
+                    }
                 }
 
                 showSpinner(`Extracting ${file.name}…`, 'This may take a moment');

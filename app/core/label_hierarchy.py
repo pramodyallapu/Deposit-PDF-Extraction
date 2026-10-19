@@ -20,6 +20,8 @@ FIELD_LABEL_HIERARCHY = {
             ("Check/EFT No", 1.00),
             ("Check / EFT No", 1.00),
             ("Check EFT No", 1.00),
+            ("Check / EFT", 1.00),
+            ("Check/EFT #", 1.00),
             ("EFT#", 0.80),
             ("Trace Number", 0.60),
             ("Check/EFT Trace Number", 0.80),
@@ -27,7 +29,10 @@ FIELD_LABEL_HIERARCHY = {
             ("EOB NUMBER", 0.30),
             ("Check/ACH#",0.70),
             ("Check No", 0.60),
-            ("Check Number", 0.50)
+            ("Check Id", 0.98),
+            ("Check Number", 0.50),
+            ("Check number", 0.70),
+            ("Check/EFT Trace #", 0.50),
         ],
         "level_2": [
             # Strong secondary options
@@ -72,12 +77,15 @@ FIELD_LABEL_HIERARCHY = {
             # Most authoritative
             ("Payment/Check Date", 1.00),
             ("Payment / Check Date", 1.00),
+            ("Payment Date", 1.00),
             ("Check Date", 1.00),
             ("CheckDate", 1.00),
             ("Date", 0.30),
             ("ISSUE DATE", 0.60),
-            ("Check/EFT Date", 0.50),
-            ("Received", 0.60)
+            ("Check/EFT Date", 0.65),
+            ("Received", 0.40),
+            ("Printed", 0.60),
+            ("Date Created", 0.65),
         ],
         "level_2": [
             # Strong secondary
@@ -130,8 +138,11 @@ FIELD_LABEL_HIERARCHY = {
             ("Check Total", 1.00),
             ("BILLED Amount", 0.90),
             ("Amount Paid", 0.65),
+            ("AMOUNT DISBURSED",0.60),
+            ("AMOUNTDISBURSED",0.60),
+            ("Direct Deposit", 0.95),
             ("Payment", 0.50),
-            ("Net Amount Paid", 0.50)
+            ("Net Amount Paid", 0.70)
         ],
         "level_2": [
             # Strong secondary
@@ -142,7 +153,6 @@ FIELD_LABEL_HIERARCHY = {
             ("Amount Paid", 0.92),
             ("AmountPaid", 0.92),
             ("Amount", 0.85),
-            ("Direct Deposit",0.75),
             ("Payment of", 0.60),
             ("NET", 0.60),
             ("Amount of",0.40)
@@ -242,6 +252,45 @@ FIELD_LABEL_HIERARCHY = {
         "rationale": "CPT is most explicit. 'Code' is too generic (could be diagnosis code, etc.)."
     },
 }
+
+FIELD_LABEL_COMBINATIONS = {
+    "check_number": [
+        {
+            "labels": ["EPC Draft #", "Check #"],
+            "prefer": "EPC Draft #",
+        },
+    ],
+    "check_date": [
+        {
+            "labels": ["Date", "Received", "ERA", "Payment"],
+            "prefer": "Received",
+        },
+        {
+            "labels": ["Date", "Received", "Check ID", "Transaction Information", "Claim Received"],
+            "prefer": "Date",
+        },
+        {
+            "labels": ["Date", "Received", "Check/EFT Trace Number", "Amount", "Check/EFT Date"],
+            "prefer": "Check/EFT Date",
+        },
+        {
+            "labels": ["EFT", "Received", "Check/EFT ", "ACC", "ON", " CHECK/EFT DT", "Received Date", "Claim Number", "Date"],
+            "prefer": "ON",
+        },
+    ],
+    "check_amount": [
+        {
+            "labels": ["ERA", "Received", "payment Information", "Payment"],
+            "prefer": "Payment",
+        },
+        {
+            "labels": ["Draft Amount", "Check Amount"],
+            "prefer": "Draft Amount",
+        },
+    ],
+}
+
+
 
 
 def get_aliases_by_level(field_name: str, level: int):
