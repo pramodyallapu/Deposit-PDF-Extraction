@@ -37,7 +37,7 @@ def find_field_candidates(text, field_name, aliases=None):
                         and value_match is matches[0]
                     ):
                         prefix_match = re.search(
-                            r"(?P<prefix>[A-Za-z0-9]{1,20}-)\s*"
+                            r"(?P<prefix>[A-Za-z0-9]{1,30}-)\s*"
                             r"(?:Date\s*:\s*(?:"
                             r"(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})|"
                             r"[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}|"
