@@ -167,7 +167,10 @@ def validate_check_number(value: str):
     if not isinstance(value, str): return False
     value = value.strip()
     if len(value) < 4 or len(value) > 25: return False
-    if not re.fullmatch(r"[A-Za-z0-9]+(?:[-/][A-Za-z0-9]+)*", value): return False
+    if not re.fullmatch(
+        r"(?:[A-Za-z0-9]{1,10}\s+\d{6,30}|"
+        r"[A-Za-z0-9]{6,30}(?:[-/][A-Za-z0-9]{1,10})?)",
+        value): return False
     if not any(c.isdigit() for c in value): return False
     bad_words = {"payment", "check", "number", "date", "amount", "provider", "payer", "insurance", "total", "paid", "service", "code", "cpt", "procedure"}
     if value.lower() in bad_words: return False

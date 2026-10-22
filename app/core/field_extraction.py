@@ -31,6 +31,13 @@ def find_field_candidates(text, field_name, aliases=None):
             for value_match in matches:
                 value = value_match.group(1).strip()
                 if field_name == "check_number":
+                    # Ignore address suite/unit numbers.
+                    if re.search(
+                        r"\b(?:STE|SUITE|APT|UNIT|BLDG|FL|FLOOR)\s*$",
+                        source_text[:value_match.start()],
+                        re.IGNORECASE):
+                        continue
+
                     if (
                         area["direction"] == "below"
                         and area["distance"] == 1
