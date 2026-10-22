@@ -31,13 +31,20 @@ def find_field_candidates(text, field_name, aliases=None):
             for value_match in matches:
                 value = value_match.group(1).strip()
                 if field_name == "check_number":
+                    # Ignore address suite/unit numbers.
+                    if re.search(
+                        r"\b(?:STE|SUITE|APT|UNIT|BLDG|FL|FLOOR)\s*$",
+                        source_text[:value_match.start()],
+                        re.IGNORECASE):
+                        continue
+
                     if (
                         area["direction"] == "below"
                         and area["distance"] == 1
                         and value_match is matches[0]
                     ):
                         prefix_match = re.search(
-                            r"(?P<prefix>[A-Za-z0-9]{1,20}-)\s*"
+                            r"(?P<prefix>[A-Za-z0-9]{1,30}-)\s*"
                             r"(?:Date\s*:\s*(?:"
                             r"(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})|"
                             r"[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}|"

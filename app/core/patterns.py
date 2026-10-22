@@ -59,7 +59,13 @@ FIELD_ALIASES = {
 # 2. FIELD-SPECIFIC REGEX
 
 FIELD_PATTERNS = {
-    "check_number": re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9]{1,20}(?:[-/][A-Za-z0-9]{1,10})?)(?![A-Za-z0-9])", re.IGNORECASE),
+    "check_number": re.compile(
+        r"(?<![A-Za-z0-9])("
+        r"[A-Za-z0-9]{1,10}\s+\d{6,30}"
+        r"|[A-Za-z0-9]{6,30}(?:[-/][A-Za-z0-9]{1,10})?"
+        r")(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    ),
     "check_date": re.compile(
         r"(?<![A-Za-z0-9])("
         r"(?:0?[1-9]|1[0-2])[/\-.](?:0?[1-9]|[12]\d|3[01])[/\-.](?:19|20)?\d{2}|"  # MM/DD/YY or MM/DD/YYYY
